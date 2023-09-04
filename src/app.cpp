@@ -600,3 +600,41 @@ void app::updateLed(void) {
         }
     }
 }
+
+//-----------------------------------------------------------------------------
+void app::check_hist_file (File file)
+{
+    if (file) {
+        uint16_t exp_index = AHOY_MIN_PAC_SUN_HOUR * 60 / AHOY_PAC_INTERVAL, index;
+        unsigned char data[4];
+
+        while (file.read (data, sizeof (data)) == sizeof (data)) {
+            index = data[0] + (data[1] << 8);
+            if (index != exp_index) {
+                DPRINTLN (DBG_WARN, "Unexpected " + String (index) + " <-> " + String (exp_index));
+            }
+            exp_index = index + 1;
+        }
+        file.close();
+    }
+}
+
+//-----------------------------------------------------------------------------
+void app::show_history (String path)
+{
+/*
+    Dir dir = LittleFS.openDir (path);
+
+    DPRINTLN (DBG_INFO, "Enter Dir: " + path);
+    while (dir.next()) {
+        if (dir.isDirectory ()) {
+            show_history (path + "/" + dir.fileName());
+        } else {
+            DPRINTLN (DBG_INFO, "file " + dir.fileName() +
+                ", Size: " + String (dir.fileSize()));
+            check_hist_file (dir.openFile ("r"));
+        }
+    }
+    DPRINTLN (DBG_INFO, "Leave Dir: " + path);
+    */
+}

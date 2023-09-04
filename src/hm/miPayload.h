@@ -26,10 +26,8 @@ typedef struct {
     uint8_t invId;
     uint8_t retransmits;
     bool gotFragment;
-    /*
-    uint8_t data[MAX_PAYLOAD_ENTRIES][MAX_RF_PAYLOAD_SIZE];
-    uint8_t maxPackId;
-    bool lastFound;*/
+    uint8_t fragments;
+    uint8_t lastFragments;
 } miPayload_t;
 
 
@@ -126,7 +124,8 @@ class MiPayload {
                     DBGPRINTLN(String(iv->powerLimit[0]));
                 }
                 iv->powerLimitAck = false;
-                mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, false, false);
+                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(),
+                    iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, false, false);
                 mPayload[iv->id].txCmd = iv->devControlCmd;
                 mPayload[iv->id].limitrequested = true;
 
@@ -150,9 +149,9 @@ class MiPayload {
                 if (cmd == 0x01 || cmd == SystemConfigPara ) { //0x1 and 0x05 for HM-types
                     cmd  = 0x0f;                              // for MI, these seem to make part of the  Polling the device software and hardware version number command
                     cmd2 = cmd == SystemConfigPara ? 0x01 : 0x00;  //perhaps we can only try to get second frame?
-                    mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd2, false, false);
+                    mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
                 } else {
-                    mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd2, false, false);
+                    mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
                 };
 
                 mPayload[iv->id].txCmd = cmd;
@@ -238,6 +237,7 @@ const byteAssign_t InfoAssignment[] = {
                     }
                     iv->isConnected = true;
                     mPayload[iv->id].gotFragment = true;
+                    mPayload[iv->id].fragments++;
                     if(mSerialDebug) {
                         DPRINT_IVID(DBG_INFO, iv->id);
                         DPRINT(DBG_INFO,F("HW_VER is "));
@@ -264,6 +264,7 @@ const byteAssign_t InfoAssignment[] = {
                         DPRINT(DBG_INFO,F("HW_PartNo "));
                         DBGPRINTLN(String((uint32_t) (((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13]));
                         mPayload[iv->id].gotFragment = true;
+                        mPayload[iv->id].fragments++;
                         record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
                         rec->ts = mPayload[iv->id].ts;
                         iv->setValue(0, rec, (uint32_t) ((((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13])/1);
@@ -307,6 +308,7 @@ const byteAssign_t InfoAssignment[] = {
                     }
                     iv->setQueuedCmdFinished();
                     mPayload[iv->id].complete = true;
+                    mPayload[iv->id].fragments++;
                     mStat->rxSuccess++;
                 }
 
@@ -460,6 +462,17 @@ const byteAssign_t InfoAssignment[] = {
                     //DPRINTLN(DBG_INFO, F("Pyld incompl code")); //info for testing only
                     bool crcPass, pyldComplete;
                     crcPass = build(iv->id, &pyldComplete);
+
+                    // evaluate quality of send channel with rcv params
+                    if (retransmit) {
+                        iv->evalTxChanQuality (crcPass, mPayload[iv->id].retransmits,
+                            mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+                        DPRINT (DBG_INFO, "Quality: ");
+                        iv->dumpTxChanQuality();
+                        DBGPRINTLN("");
+                    }
+
+                    mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
                     if (!crcPass && !pyldComplete) { // payload not complete
                         if ((mPayload[iv->id].requested) && (retransmit)) {
                             if (iv->devControlCmd == Restart || iv->devControlCmd == CleanState_LockAndAlarm) {
@@ -470,7 +483,7 @@ const byteAssign_t InfoAssignment[] = {
                             } else if(iv->devControlCmd == ActivePowerContr) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINTLN(F("retransmit power limit"));
-                                mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, true, false);
+                                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, true, false);
                             } else {
                                 uint8_t cmd = mPayload[iv->id].txCmd;
                                 if (mPayload[iv->id].retransmits < mMaxRetrans) {
@@ -481,7 +494,7 @@ const byteAssign_t InfoAssignment[] = {
                                         mPayload[iv->id].retransmits = mMaxRetrans;
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
-                                        mRadio->sendCmdPacket(iv->radioId.u64, 0x0f, 0x00, true, false);
+                                        mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), 0x0f, 0x00, true, false);
                                         //iv->setQueuedCmdFinished();
                                         //cmd = iv->getQueuedCmd();
                                     } else {
@@ -518,7 +531,7 @@ const byteAssign_t InfoAssignment[] = {
                                         }
                                         DBGPRINT(F(" 0x"));
                                         DBGHEXLN(cmd);
-                                        mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd, true, false);
+                                        mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd, true, false);
                                         yield();
                                     }
                                 }
@@ -534,7 +547,7 @@ const byteAssign_t InfoAssignment[] = {
 
                             DBGPRINT(F("prepareDevInformCmd 0x"));
                             DBGHEXLN(mPayload[iv->id].txCmd);
-                            mRadio->sendCmdPacket(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
+                            mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
                         }
                     }
 
@@ -554,6 +567,7 @@ const byteAssign_t InfoAssignment[] = {
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);  // choose the record structure
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
             mPayload[iv->id].txId = p->packet[0];
             miStsConsolidate(iv, stschan, rec, p->packet[10], p->packet[12], p->packet[9], p->packet[11]);
             mPayload[iv->id].stsAB[stschan] = true;
@@ -625,6 +639,7 @@ const byteAssign_t InfoAssignment[] = {
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);  // choose the parser
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
 
             uint8_t datachan = ( p->packet[0] == 0x89 || p->packet[0] == (0x36 + ALL_FRAMES) ) ? CH1 :
                            ( p->packet[0] == 0x91 || p->packet[0] == (0x37 + ALL_FRAMES) ) ? CH2 :
@@ -737,7 +752,7 @@ const byteAssign_t InfoAssignment[] = {
             uint8_t txCmd = mPayload[id].txCmd;
 
             if(!*complete) {
-                DPRINTLN(DBG_VERBOSE, F("incomplete, txCmd is 0x") + String(txCmd, HEX));
+                DPRINTLN(DBG_VERBOSE, F("incomlete, txCmd is 0x") + String(txCmd, HEX));
                 //DBGHEXLN(txCmd);
                 if (txCmd == 0x09 || txCmd == 0x11 || (txCmd >= 0x36 && txCmd <= 0x39))
                     return false;
@@ -772,8 +787,8 @@ const byteAssign_t InfoAssignment[] = {
             DBGPRINTLN(F("resetPayload"));
             memset(mPayload[id].len, 0, MAX_PAYLOAD_ENTRIES);
             mPayload[id].gotFragment = false;
-            /*mPayload[id].maxPackId   = MAX_PAYLOAD_ENTRIES;
-            mPayload[id].lastFound   = false;*/
+            mPayload[id].fragments = 0;
+            mPayload[id].lastFragments = 0;
             mPayload[id].retransmits = 0;
             mPayload[id].complete    = false;
             mPayload[id].dataAB[CH0] = true; //required for 1CH and 2CH devices

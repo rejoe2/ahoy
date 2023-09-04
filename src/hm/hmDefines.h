@@ -336,4 +336,35 @@ const devInfo_t devInfo[] = {
     { 0x103331, 2250 }
 };
 
+#define RF_CHANNELS         5
+//originally in hmDefines.h by oberfritze
+#define AHOY_RF24_DEF_TX_CHANNEL 2 // 40
+#define AHOY_RF24_DEF_RX_CHANNEL 0 // 3
+
+//originally in hmInverter.h by oberfritze
+// Send channel heuristic has 2 strategies:
+// - Evaluation of current send channel quality due to receive situation and compare with others
+#define RF_TX_CHAN_MAX_QUALITY        4
+#define RF_TX_CHAN_MIN_QUALITY       -6
+#define RF_TX_CHAN_QUALITY_GOOD       2
+#define RF_TX_CHAN_QUALITY_OK         1
+#define RF_TX_CHAN_QUALITY_NEUTRAL    0
+#define RF_TX_CHAN_QUALITY_LOW       -1
+#define RF_TX_CHAN_QUALITY_BAD       -2
+// - if more than _MAX_FAIL_CNT problems during _MAX_SEND_CNT test period: try another chan and see if it works (even) better
+#define RF_TEST_PERIOD_MAX_FAIL_CNT   5
+#define RF_TEST_PERIOD_MAX_SEND_CNT   50
+// mark current test chan as 1st use during this test period
+#define RF_TX_TEST_CHAN_1ST_USE       0xff
+
+#define RX_ANSWER_TMO       400
+#define RX_WAIT_SFR_TMO     40
+#define RX_WAIT_SAFETY_MRGN 20
+
+#define RX_CHAN_TMO         5110
+#define RX_CHAN_MHCH1_TMO   10220
+
+#define RX_DEF_MAX_CHANNELS RF_CHANNELS
+#define RX_HMCH1_MAX_CHANNELS 2
+
 #endif /*__HM_DEFINES_H__*/

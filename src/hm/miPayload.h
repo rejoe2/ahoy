@@ -195,6 +195,8 @@ class MiPayload {
                 record_t<> *rec = iv->getRecordStruct(InverterDevInform_All);  // choose the record structure
                 rec->ts = mPayload[iv->id].ts;
                 mPayload[iv->id].gotFragment = true;
+                mPayload[iv->id].fragments++;
+
                 if(mHighPrioIv == NULL)                          // process next request immediately if possible
                     mHighPrioIv = iv;
 
@@ -239,8 +241,6 @@ const byteAssign_t InfoAssignment[] = {
                         iv->setValue(i, rec, (float) ((p->packet[(12+2*i)] << 8) + p->packet[(13+2*i)])/1);
                     }
                     iv->isConnected = true;
-                    mPayload[iv->id].gotFragment = true;
-                    mPayload[iv->id].fragments++;
                     if(mSerialDebug) {
                         DPRINT_IVID(DBG_INFO, iv->id);
                         DPRINT(DBG_INFO,F("HW_VER is "));
@@ -266,7 +266,6 @@ const byteAssign_t InfoAssignment[] = {
 
                         DPRINT(DBG_INFO,F("HW_PartNo "));
                         DBGPRINTLN(String((uint32_t) (((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13]));
-                        mPayload[iv->id].gotFragment = true;
                         mPayload[iv->id].fragments++;
                         record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
                         rec->ts = mPayload[iv->id].ts;
@@ -313,7 +312,6 @@ const byteAssign_t InfoAssignment[] = {
                     mPayload[iv->id].complete = true;
                     mPayload[iv->id].rxTmo    = true;
                     mPayload[iv->id].requested= false;
-                    mPayload[iv->id].fragments++;
                     mStat->rxSuccess++;
                 }
 
@@ -456,12 +454,13 @@ const byteAssign_t InfoAssignment[] = {
                 }
 
                 if (!mPayload[iv->id].complete) {
-                    bool crcPass, pyldComplete;
-                    crcPass = build(iv->id, &pyldComplete);
+                    bool gotAllMsgParts, pyldComplete;
+                    gotAllMsgParts = build(iv->id, &pyldComplete);
 
                     // evaluate quality of send channel with rcv params
-                    if ( (retransmit) &&  (mPayload[iv->id].retransmits < mMaxRetrans) ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
-                        iv->evalTxChanQuality (crcPass, mPayload[iv->id].retransmits,
+                    if ( (retransmit) && (mPayload[iv->id].requested) && ( (mPayload[iv->id].retransmits < mMaxRetrans) || gotAllMsgParts ) ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
+                        //iv->evalTxChanQuality (gotAllMsgParts, mPayload[iv->id].retransmits,
+                        iv->evalTxChanQuality (mPayload[iv->id].gotFragment, mPayload[iv->id].retransmits,
                             mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
                         DPRINT_IVID(DBG_INFO, iv->id);
                         DBGPRINT("Quality: ");
@@ -470,7 +469,7 @@ const byteAssign_t InfoAssignment[] = {
                     }
 
                     mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
-                    if (!crcPass && !pyldComplete) { // payload not complete
+                    if (!gotAllMsgParts && !pyldComplete) { // payload not complete
                         if ((mPayload[iv->id].requested) && (retransmit)) {
                             if (iv->devControlCmd == Restart || iv->devControlCmd == CleanState_LockAndAlarm) {
                                 // This is required to prevent retransmissions without answer.
@@ -536,7 +535,7 @@ const byteAssign_t InfoAssignment[] = {
                                 }
                             }
                         }
-                    } else if(!crcPass && pyldComplete) { // crc error on complete Payload
+                    } else if(!gotAllMsgParts && pyldComplete) { // crc error on complete Payload
                         if (mPayload[iv->id].retransmits < mMaxRetrans) {
                             mPayload[iv->id].retransmits++;
                             DPRINT_IVID(DBG_WARN, iv->id);

@@ -102,8 +102,8 @@ class MiPayload {
                                 DBGPRINTLN(F(")"));
                             }
                         }
-                        mPayload[iv->id].rxTmo = true;
-                        mPayload[iv->id].complete;
+                        mPayload[iv->id].rxTmo    = true;
+                        mPayload[iv->id].complete = true;
                         iv->setQueuedCmdFinished(); // command failed
                     }
                 }
@@ -164,11 +164,10 @@ class MiPayload {
                     mPayload[iv->id].stsAB[CH1] = false;
                     mPayload[iv->id].dataAB[CH0] = false;
                     mPayload[iv->id].stsAB[CH0] = false;
-                }
-
-                if (iv->type == INV_TYPE_2CH) {
-                    mPayload[iv->id].dataAB[CH2] = false;
-                    mPayload[iv->id].stsAB[CH2] = false;
+                    if (iv->type == INV_TYPE_2CH) {
+                        mPayload[iv->id].dataAB[CH2] = false;
+                        mPayload[iv->id].stsAB[CH2] = false;
+                    }
                 }
             }
         }
@@ -312,6 +311,8 @@ const byteAssign_t InfoAssignment[] = {
                     }
                     iv->setQueuedCmdFinished();
                     mPayload[iv->id].complete = true;
+                    mPayload[iv->id].rxTmo    = true;
+                    mPayload[iv->id].requested= false;
                     mPayload[iv->id].fragments++;
                     mStat->rxSuccess++;
                 }
@@ -375,8 +376,6 @@ const byteAssign_t InfoAssignment[] = {
                 DBGHEXLN(mPayload[iv->id].txCmd);
                 DPRINT(DBG_INFO, F("procPyld: txid: 0x"));
                 DBGHEXLN(mPayload[iv->id].txId);
-                //DPRINT(DBG_DEBUG, F("procPyld: max:  "));
-                //DBGPRINTLN(String(mPayload[iv->id].maxPackId));
                 record_t<> *rec = iv->getRecordStruct(mPayload[iv->id].txCmd);  // choose the parser
                 mPayload[iv->id].complete = true;
 
@@ -438,7 +437,7 @@ const byteAssign_t InfoAssignment[] = {
                 if (NULL == iv)
                     continue; // skip to next inverter
 
-                if (IV_HM == iv->ivGen) // only process MI inverters
+                if (IV_MI != iv->ivGen) // only process MI inverters
                     continue; // skip to next inverter
 
                 if ( !mPayload[iv->id].complete &&
@@ -461,7 +460,7 @@ const byteAssign_t InfoAssignment[] = {
                     crcPass = build(iv->id, &pyldComplete);
 
                     // evaluate quality of send channel with rcv params
-                    if ( (retransmit) && (mPayload[iv->id].requested) && (!mPayload[iv->id].rxTmo) ) {
+                    if ( (retransmit) && (!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
                         iv->evalTxChanQuality (crcPass, mPayload[iv->id].retransmits,
                             mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
                         DPRINT_IVID(DBG_INFO, iv->id);
@@ -478,6 +477,7 @@ const byteAssign_t InfoAssignment[] = {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINTLN(F("Prevent retransmit on Restart / CleanState_LockAndAlarm..."));
                                 mPayload[iv->id].retransmits = mMaxRetrans;
+                                mPayload[iv->id].rxTmo = true;
                             } else if(iv->devControlCmd == ActivePowerContr) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINTLN(F("retransmit power limit"));
@@ -494,8 +494,6 @@ const byteAssign_t InfoAssignment[] = {
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
                                         mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), 0x0f, 0x00, true, false);
-                                        //iv->setQueuedCmdFinished();
-                                        //cmd = iv->getQueuedCmd();
                                     } else {
                                         bool change = false;
                                         if ( cmd >= 0x36 && cmd < 0x39 ) { // MI-1500 Data command
@@ -552,8 +550,11 @@ const byteAssign_t InfoAssignment[] = {
                         } else {
                             mPayload[iv->id].rxTmo = true;
                         }
+                    } else {
+                        mPayload[iv->id].rxTmo = true;
                     }
-
+                } else {
+                    mPayload[iv->id].rxTmo = true;
                 }
                 yield();
             }
@@ -743,6 +744,7 @@ const byteAssign_t InfoAssignment[] = {
 
             iv->setQueuedCmdFinished();
             mStat->rxSuccess++;
+            mPayload[iv->id].requested = false;
             yield();
             notify(RealTimeRunData_Debug, iv);
         }

@@ -247,7 +247,7 @@ class HmPayload {
                     crcPass = build(iv->id, &pyldComplete, &Fragments);
                     //crcPass = build(iv->id, &pyldComplete);
                     // evaluate quality of send channel with rcv params
-                    if ( (retransmit) && (mPayload[iv->id].requested) && (!mPayload[iv->id].rxTmo) ) {
+                    if ( (retransmit) && (mPayload[iv->id].requested) && (!mPayload[iv->id].rxTmo) ) {// (!mPayload[iv->id].rxTmo) && (!pyldComplete) ) { //(mPayload[iv->id].requested) &&
                         iv->evalTxChanQuality (crcPass, mPayload[iv->id].retransmits,
                             Fragments, mPayload[iv->id].lastFragments);
                         DPRINT_IVID(DBG_INFO, iv->id);

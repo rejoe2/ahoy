@@ -26,8 +26,10 @@ typedef struct {
     uint8_t invId;
     uint8_t retransmits;
     bool gotFragment;
+    bool rxTmo;
     uint8_t fragments;
     uint8_t lastFragments;
+
 } miPayload_t;
 
 
@@ -89,20 +91,22 @@ class MiPayload {
                             DPRINT_IVID(DBG_INFO, iv->id);
                         if (!mPayload[iv->id].gotFragment) {
                             mStat->rxFailNoAnser++; // got nothing
-                        if (mSerialDebug)
-                            DBGPRINTLN(F("enqueued cmd failed/timeout"));
+                            if (mSerialDebug)
+                                DBGPRINTLN(F("enqueued cmd failed/timeout"));
                         } else {
                             mStat->rxFail++;        // got "fragments" (part of the required messages)
                                                     // but no complete set of responses
-                        if (mSerialDebug) {
+                            if (mSerialDebug) {
                                 DBGPRINT(F("no complete Payload received! (retransmits: "));
-                            DBGPRINT(String(mPayload[iv->id].retransmits));
-                            DBGPRINTLN(F(")"));
+                                DBGPRINT(String(mPayload[iv->id].retransmits));
+                                DBGPRINTLN(F(")"));
+                            }
                         }
-                    }
+                        mPayload[iv->id].rxTmo = true;
+                        mPayload[iv->id].complete;
                         iv->setQueuedCmdFinished(); // command failed
+                    }
                 }
-            }
             }
 
             reset(iv->id);
@@ -448,23 +452,16 @@ const byteAssign_t InfoAssignment[] = {
                     (mPayload[iv->id].txId != 0 )) {
                     // no processing needed if txId is not one of 0x95, 0x88, 0x89, 0x91, 0x92 or response to 0x36ff
                     mPayload[iv->id].complete = true;
+                    mPayload[iv->id].rxTmo = true;
                     continue; // skip to next inverter
                 }
 
-                //delayed next message?
-                //mPayload[iv->id].skipfirstrepeat++;
-                /*if (mPayload[iv->id].skipfirstrepeat) {
-                    mPayload[iv->id].skipfirstrepeat = 0; //reset counter
-                    continue; // skip to next inverter
-                }*/
-
                 if (!mPayload[iv->id].complete) {
-                    //DPRINTLN(DBG_INFO, F("Pyld incompl code")); //info for testing only
                     bool crcPass, pyldComplete;
                     crcPass = build(iv->id, &pyldComplete);
 
                     // evaluate quality of send channel with rcv params
-                    if ( (retransmit) && (mPayload[iv->id].requested) ) {
+                    if ( (retransmit) && (mPayload[iv->id].requested) && (!mPayload[iv->id].rxTmo) ) {
                         iv->evalTxChanQuality (crcPass, mPayload[iv->id].retransmits,
                             mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
                         DPRINT_IVID(DBG_INFO, iv->id);
@@ -493,6 +490,7 @@ const byteAssign_t InfoAssignment[] = {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
                                         mPayload[iv->id].retransmits = mMaxRetrans;
+                                        mPayload[iv->id].rxTmo = true;
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
                                         mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), 0x0f, 0x00, true, false);
@@ -535,6 +533,8 @@ const byteAssign_t InfoAssignment[] = {
                                         mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd, true, false);
                                         yield();
                                     }
+                                } else {
+                                    mPayload[iv->id].rxTmo = true;
                                 }
                             }
                         }
@@ -549,6 +549,8 @@ const byteAssign_t InfoAssignment[] = {
                             DBGPRINT(F("prepareDevInformCmd 0x"));
                             DBGHEXLN(mPayload[iv->id].txCmd);
                             mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
+                        } else {
+                            mPayload[iv->id].rxTmo = true;
                         }
                     }
 
@@ -789,7 +791,8 @@ const byteAssign_t InfoAssignment[] = {
             memset(mPayload[id].len, 0, MAX_PAYLOAD_ENTRIES);
             mPayload[id].gotFragment = false;
             mPayload[id].fragments = 0;
-            mPayload[id].lastFragments = 0;
+            mPayload[id].rxTmo     = false;// design: don't start with complete retransmit
+            mPayload[id].lastFragments = 0;  // for send channel quality measurement
             mPayload[id].retransmits = 0;
             mPayload[id].complete    = false;
             mPayload[id].dataAB[CH0] = true; //required for 1CH and 2CH devices

@@ -77,6 +77,13 @@ enum {CH0 = 0, CH1, CH2, CH3, CH4, CH5, CH6};
 
 enum {INV_TYPE_1CH = 0, INV_TYPE_2CH, INV_TYPE_4CH, INV_TYPE_6CH};
 
+typedef enum {                  // for radio special handling
+    INV_TYPE_DEFAULT,
+    INV_TYPE_HMCH1,
+    INV_TYPE_HMCH2,
+    INV_TYPE_HMCH4,
+} inv_type_t;
+
 
 typedef struct {
     uint8_t    fieldId; // field id

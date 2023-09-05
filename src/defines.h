@@ -13,7 +13,7 @@
 //-------------------------------------
 #define VERSION_MAJOR       0
 #define VERSION_MINOR       7
-#define VERSION_PATCH       453
+#define VERSION_PATCH       458
 
 //-------------------------------------
 typedef struct {
@@ -23,15 +23,6 @@ typedef struct {
     long delay;                 // micros since preceeding tx_fail irq and this rx_ready irq
     uint8_t packet[MAX_RF_PAYLOAD_SIZE];
 } packet_t;
-
-
-typedef enum {                  // for radio special handling
-    INV_TYPE_DEFAULT,
-    INV_TYPE_HMCH1,
-    INV_TYPE_HMCH2,
-    INV_TYPE_HMCH4,
-} inv_type_t;
-
 
 typedef enum {
     InverterDevInform_Simple = 0,  // 0x00
@@ -84,12 +75,6 @@ union serial_u {
 #define MIN_SEND_INTERVAL       15
 #define MIN_MQTT_INTERVAL       60
 
-#define AHOY_HIST_PATH "/hist"
-// reduce resources and increase clarity for statistic output
-#define AHOY_MIN_PAC_SUN_HOUR 6
-#define AHOY_MAX_PAC_SUN_HOUR 20
-// average power interval in minutes
-#define AHOY_PAC_INTERVAL 10
 
 enum {MQTT_STATUS_OFFLINE = 0, MQTT_STATUS_PARTIAL, MQTT_STATUS_ONLINE};
 

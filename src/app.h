@@ -257,9 +257,6 @@ class app : public IApp, public ah::Scheduler {
                 Scheduler::setTimestamp(newTime);
         }
 
-        void show_history (String path);
-        void check_hist_file (File file);
-
     private:
         #define CHECK_AVAIL     true
         #define SKIP_YIELD_DAY  true

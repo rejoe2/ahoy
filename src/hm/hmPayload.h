@@ -325,6 +325,7 @@ class HmPayload {
                         DPRINTLN(DBG_DEBUG, String(mPayload[iv->id].maxPackId));
                         record_t<> *rec = iv->getRecordStruct(mPayload[iv->id].txCmd);  // choose the parser
                         mPayload[iv->id].complete = true;
+                        mPayload[iv->id].requested = false;
                         mPayload[iv->id].rxTmo = false;
 
                         uint8_t payload[150];

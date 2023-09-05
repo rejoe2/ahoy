@@ -378,7 +378,7 @@ class HmRadio {
             mNrf24.setChannel(rf24ChLst[mTxChIdx]);
             mNrf24.openWritingPipe(reinterpret_cast<uint8_t*>(&invId));
             mRfIrqIndex = 0;
-            mNrf24.startWrite(mTxBuf, len, false); // false = request ACK response
+            mNrf24.startWrite(mTxBuf, len, NRFREQACK); // false = request ACK response
 
             if(isRetransmit)
                 mRetransmits++;

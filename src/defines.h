@@ -13,7 +13,7 @@
 //-------------------------------------
 #define VERSION_MAJOR       0
 #define VERSION_MINOR       7
-#define VERSION_PATCH       458
+#define VERSION_PATCH       459
 
 //-------------------------------------
 typedef struct {
@@ -23,6 +23,8 @@ typedef struct {
     long delay;                 // micros since preceeding tx_fail irq and this rx_ready irq
     uint8_t packet[MAX_RF_PAYLOAD_SIZE];
 } packet_t;
+
+#define NRFREQACK true
 
 typedef enum {
     InverterDevInform_Simple = 0,  // 0x00

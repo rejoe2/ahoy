@@ -232,11 +232,6 @@ class Inverter {
                             enqueCommand<InfoCommand>( type == INV_TYPE_4CH ? 0x36 : 0x09 );
                         }
                     }
-/*                    if (type == INV_TYPE_4CH) {
-                        enqueCommand<InfoCommand>(0x36);
-                    } else {
-                        enqueCommand<InfoCommand>(0x09);
-                    } */
                 }
 
                 if ((actPowerLimit == 0xffff) && isConnected)

@@ -26,6 +26,7 @@ typedef struct {
     uint8_t invId;
     uint8_t retransmits;
     uint8_t req_rtrnsmts; // for quality
+    uint8_t multi_parts;  // for quality
     bool gotFragment;
     bool rxTmo;
     uint8_t fragments;
@@ -152,8 +153,8 @@ class MiPayload {
                 }
 
                 if (cmd == 0x01 || cmd == SystemConfigPara ) { //0x1 and 0x05 for HM-types
-                    cmd  = 0x0f;                              // for MI, these seem to make part of the  Polling the device software and hardware version number command
                     cmd2 = cmd == SystemConfigPara ? 0x01 : 0x00;  //perhaps we can only try to get second frame?
+                    cmd  = 0x0f;                              // for MI, these seem to make part of the  Polling the device software and hardware version number command
                     mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
                 } else {
                     mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
@@ -383,11 +384,6 @@ const byteAssign_t InfoAssignment[] = {
 
                 memset(payload, 0, 128);
 
-                /*for (uint8_t i = 0; i < (mPayload[iv->id].maxPackId); i++) {
-                    memcpy(&payload[payloadLen], mPayload[iv->id].data[i], (mPayload[iv->id].len[i]));
-                    payloadLen += (mPayload[iv->id].len[i]);
-                    yield();
-                }*/
                 payloadLen -= 2;
 
                 if (mSerialDebug) {
@@ -459,14 +455,29 @@ const byteAssign_t InfoAssignment[] = {
                     gotAllMsgParts = build(iv->id, &pyldComplete);
 
                     // evaluate quality of send channel with rcv params
-                    if ( (retransmit) && (mPayload[iv->id].requested) && ( (mPayload[iv->id].retransmits < mMaxRetrans) || gotAllMsgParts ) ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
+                    if ( (retransmit) && (mPayload[iv->id].requested)
+                          && ( (mPayload[iv->id].retransmits < mMaxRetrans) || gotAllMsgParts )
+                          && (mPayload[iv->id].txCmd != 0x0f) ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
+
                         //iv->evalTxChanQuality (gotAllMsgParts, mPayload[iv->id].retransmits,
-                        iv->evalTxChanQuality (mPayload[iv->id].gotFragment, mPayload[iv->id].req_rtrnsmts,
-                            mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+                        bool allParts;
+                        uint8_t qFrag = mPayload[iv->id].fragments;
+                        if (iv->type == INV_TYPE_4CH) {
+                            allParts = !mPayload[iv->id].retransmits ? true : false;
+                        } else {
+                            allParts = mPayload[id].multi_parts == 7 ? true : false;
+                            if (!allParts) {
+                                qFrag = mPayload[iv->id].req_rtrnsmts;
+                            }
+                        }
+                        iv->evalTxChanQuality ( allParts, mPayload[iv->id].req_rtrnsmts,
+                            qFrag, mPayload[iv->id].lastFragments);
                         DPRINT_IVID(DBG_INFO, iv->id);
                         DBGPRINT("Quality: ");
                         iv->dumpTxChanQuality();
-                        DBGPRINTLN("");
+                        DBGPRINT(" multi: ");
+                        DBGPRINTLN(allParts ? "OK":"fail");
+                        //DBGPRINTLN("");
                     }
 
                     mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
@@ -495,6 +506,7 @@ const byteAssign_t InfoAssignment[] = {
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
                                         mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), 0x0f, 0x00, true, false);
+                                        mPayload[id].multi_parts = 0;
                                     } else {
                                         bool change = false;
                                         if ( cmd >= 0x36 && cmd < 0x39 ) { // MI-1500 Data command
@@ -530,6 +542,7 @@ const byteAssign_t InfoAssignment[] = {
                                         }
                                         DBGPRINT(F(" 0x"));
                                         DBGHEXLN(cmd);
+                                        mPayload[id].multi_parts = 0;
                                         mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd, true, false);
                                         yield();
                                     }
@@ -545,8 +558,8 @@ const byteAssign_t InfoAssignment[] = {
                             DPRINT_IVID(DBG_WARN, iv->id);
                             DBGPRINTLN(F("CRC Error: Request Complete Retransmit"));
                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
+                            mPayload[id].multi_parts  = 0;
                             DPRINT_IVID(DBG_INFO, iv->id);
-
                             DBGPRINT(F("prepareDevInformCmd 0x"));
                             DBGHEXLN(mPayload[iv->id].txCmd);
                             mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
@@ -575,6 +588,7 @@ const byteAssign_t InfoAssignment[] = {
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
             mPayload[iv->id].fragments++;
+            mPayload[iv->id].multi_parts += 3;
             mPayload[iv->id].txId = p->packet[0];
             miStsConsolidate(iv, stschan, rec, p->packet[10], p->packet[12], p->packet[9], p->packet[11]);
             mPayload[iv->id].stsAB[stschan] = true;
@@ -647,6 +661,7 @@ const byteAssign_t InfoAssignment[] = {
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
             mPayload[iv->id].fragments++;
+            mPayload[iv->id].multi_parts += 4;
 
             uint8_t datachan = ( p->packet[0] == 0x89 || p->packet[0] == (0x36 + ALL_FRAMES) ) ? CH1 :
                            ( p->packet[0] == 0x91 || p->packet[0] == (0x37 + ALL_FRAMES) ) ? CH2 :
@@ -747,6 +762,14 @@ const byteAssign_t InfoAssignment[] = {
 
             iv->setQueuedCmdFinished();
             mStat->rxSuccess++;
+
+            iv->evalTxChanQuality( true, mPayload[iv->id].req_rtrnsmts,
+                mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+
+            DPRINT_IVID(DBG_INFO, iv->id);
+            DBGPRINT("Quality: ");
+            iv->dumpTxChanQuality();
+            DBGPRINTLN("");
             mPayload[iv->id].requested = false;
             yield();
             notify(RealTimeRunData_Debug, iv);
@@ -800,6 +823,7 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].lastFragments = 0;  // for send channel quality measurement
             mPayload[id].retransmits = 0;
             mPayload[id].req_rtrnsmts = 0;
+            mPayload[id].multi_parts  = 0;
             mPayload[id].complete    = false;
             mPayload[id].dataAB[CH0] = true; //required for 1CH and 2CH devices
             mPayload[id].dataAB[CH1] = true; //required for 1CH and 2CH devices

@@ -170,7 +170,6 @@ class HmPayload {
         }
 
         void add(Inverter<> *iv, packet_t *p) {
-            //DPRINTLN(DBG_INFO, String(&p->packet[9], HEX));
             if (p->packet[0] == (TX_REQ_INFO + ALL_FRAMES)) {  // response from get information command
                 mPayload[iv->id].txId = p->packet[0];
                 DPRINTLN(DBG_DEBUG, F("Response from info request received"));

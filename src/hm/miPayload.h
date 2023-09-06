@@ -25,6 +25,7 @@ typedef struct {
     uint8_t txId;
     uint8_t invId;
     uint8_t retransmits;
+    uint8_t req_rtrnsmts; // for quality
     bool gotFragment;
     bool rxTmo;
     uint8_t fragments;
@@ -460,7 +461,7 @@ const byteAssign_t InfoAssignment[] = {
                     // evaluate quality of send channel with rcv params
                     if ( (retransmit) && (mPayload[iv->id].requested) && ( (mPayload[iv->id].retransmits < mMaxRetrans) || gotAllMsgParts ) ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
                         //iv->evalTxChanQuality (gotAllMsgParts, mPayload[iv->id].retransmits,
-                        iv->evalTxChanQuality (mPayload[iv->id].gotFragment, mPayload[iv->id].retransmits,
+                        iv->evalTxChanQuality (mPayload[iv->id].gotFragment, mPayload[iv->id].req_rtrnsmts,
                             mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
                         DPRINT_IVID(DBG_INFO, iv->id);
                         DBGPRINT("Quality: ");
@@ -485,6 +486,7 @@ const byteAssign_t InfoAssignment[] = {
                                 uint8_t cmd = mPayload[iv->id].txCmd;
                                 if (mPayload[iv->id].retransmits < mMaxRetrans) {
                                     mPayload[iv->id].retransmits++;
+                                    mPayload[iv->id].req_rtrnsmts++;
                                     if( !mPayload[iv->id].gotFragment ) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
@@ -521,6 +523,7 @@ const byteAssign_t InfoAssignment[] = {
                                             DBGPRINT(F("next request is"));
                                             //mPayload[iv->id].skipfirstrepeat = 0;
                                             mPayload[iv->id].txCmd = cmd;
+                                            mPayload[iv->id].req_rtrnsmts = 0;
                                         } else {
                                             DBGPRINT(F("sth."));
                                             DBGPRINT(F(" missing: Request Retransmit"));
@@ -538,6 +541,7 @@ const byteAssign_t InfoAssignment[] = {
                     } else if(!gotAllMsgParts && pyldComplete) { // crc error on complete Payload
                         if (mPayload[iv->id].retransmits < mMaxRetrans) {
                             mPayload[iv->id].retransmits++;
+                            mPayload[iv->id].req_rtrnsmts++;
                             DPRINT_IVID(DBG_WARN, iv->id);
                             DBGPRINTLN(F("CRC Error: Request Complete Retransmit"));
                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
@@ -795,6 +799,7 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].rxTmo     = false;// design: don't start with complete retransmit
             mPayload[id].lastFragments = 0;  // for send channel quality measurement
             mPayload[id].retransmits = 0;
+            mPayload[id].req_rtrnsmts = 0;
             mPayload[id].complete    = false;
             mPayload[id].dataAB[CH0] = true; //required for 1CH and 2CH devices
             mPayload[id].dataAB[CH1] = true; //required for 1CH and 2CH devices

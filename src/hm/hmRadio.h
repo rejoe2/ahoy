@@ -183,10 +183,6 @@ class HmRadio {
         }
 
         void handleIntr(void) {
-            if (mRfIrqIndex < MAX_PAYLOAD_ENTRIES) {
-                // it is allowed to call micros() inside irq handler to read the time (but check for unexpected restart reasons)
-                mRfIrqTime[mRfIrqIndex++] = micros(); // remember Time of tx_fail and rx_readies
-            }
             mIrqRcvd = true;
         }
 
@@ -311,8 +307,6 @@ class HmRadio {
                     packet_t p;
                     p.ch = mRxChannels[mRxChIdx];
                     p.len = (len > MAX_RF_PAYLOAD_SIZE) ? MAX_RF_PAYLOAD_SIZE : len;
-                    if (mRfIrqIndex)
-                        p.delay = mRfIrqTime[mRfIrqIndex - 1] - mRfIrqTime[0];
                     p.rssi = mNrf24.testRPD() ? -64 : -75;
                     mNrf24.read(p.packet, p.len);
                     if (p.packet[0] != 0x00) {
@@ -325,8 +319,8 @@ class HmRadio {
                             isLastPackage = true;                       // response from dev control command
                     }
                 }
-                    yield();
-                }
+                yield();
+            }
             return isLastPackage;
         }
 
@@ -377,8 +371,7 @@ class HmRadio {
             mNrf24.stopListening();
             mNrf24.setChannel(rf24ChLst[mTxChIdx]);
             mNrf24.openWritingPipe(reinterpret_cast<uint8_t*>(&invId));
-            mRfIrqIndex = 0;
-            mNrf24.startWrite(mTxBuf, len, NRFREQACK); // false = request ACK response
+            mNrf24.startWrite(mTxBuf, len, false); // false = request ACK response
 
             if(isRetransmit)
                 mRetransmits++;
@@ -399,7 +392,6 @@ class HmRadio {
         uint32_t  mRxAnswerTmo;       // max wait time in millis for answers of inverter
         uint32_t  mRxChanTmo;         // max wait time in micros for a rx channel
 
-        volatile uint8_t mRfIrqIndex;
         volatile long mRfIrqTime[1 + MAX_PAYLOAD_ENTRIES];
 
         SPIClass* mSpi;

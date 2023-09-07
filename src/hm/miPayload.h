@@ -506,9 +506,6 @@ void RFisTime2Send (void) {
             mPayload[iv->id].stsAB[stschan] = true;
             if (mPayload[iv->id].stsAB[CH1] && mPayload[iv->id].stsAB[CH2])
                 mPayload[iv->id].stsAB[CH0] = true;
-            //if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0] && !mPayload[iv->id].complete) {
-            //    miComplete(iv);
-           //}
         }
 
         void miStsConsolidate(Inverter<> *iv, uint8_t stschan,  record_t<> *rec, uint8_t uState, uint8_t uEnum, uint8_t lState = 0, uint8_t lEnum = 0) {
@@ -635,7 +632,7 @@ void RFisTime2Send (void) {
             }*/
         }
 
-        void miComplete(Inverter<> *iv) { //}, bool allFrames=true) {
+        void miComplete(Inverter<> *iv) {
             if ( mPayload[iv->id].complete )
                 return; //if we got second message as well in repreated attempt
             mPayload[iv->id].complete = true;
@@ -660,11 +657,6 @@ void RFisTime2Send (void) {
             iv->isProducing();
 
             iv->setQueuedCmdFinished();
-            /*if (!allFrames) {
-                DPRINTLN(DBG_INFO, F("0x88/0x92 missed"));
-                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
-                mPayload[iv->id].evaluate_q = false;
-            }*/
             mStat->rxSuccess++;
             yield();
             notify(RealTimeRunData_Debug, iv);
@@ -680,7 +672,7 @@ void RFisTime2Send (void) {
 
             if(!*complete) {
                 DPRINTLN(DBG_VERBOSE, F("incomlete, txCmd is 0x") + String(txCmd, HEX));
-                //DBGHEXLN(txCmd);
+                //we got some delayed status msgs?!?
                 if (txCmd == 0x09 || txCmd == 0x11)
                     if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0]) {
                       miComplete(iv);
@@ -689,9 +681,6 @@ void RFisTime2Send (void) {
                     }
                     return false;
                 if (txCmd >= 0x36 && txCmd <= 0x39) {
-                    mPayload[iv->id].evaluate_q = true;
-                     if (txCmd != 0x39)
-                        *fastNext = true;
                     return false;
                 }
                 if (txCmd == 0x0f) {  //hw info request, at least hw part nr. and version have to be there...

@@ -22,6 +22,8 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
+#define NRF_REQACK_INVERSE true // true switches to multicast method in startWrite(). Tries to overcome a potential bug in the RF24 lib, see https://github.com/nRF24/RF24/issues/877?
+
 const char* const rf24AmpPowerNames[] = {"MIN", "LOW", "HIGH", "MAX"};
 
 // Depending on the program, the module can work on 2403, 2423, 2440, 2461 or 2475MHz.
@@ -371,7 +373,7 @@ class HmRadio {
             mNrf24.stopListening();
             mNrf24.setChannel(rf24ChLst[mTxChIdx]);
             mNrf24.openWritingPipe(reinterpret_cast<uint8_t*>(&invId));
-            mNrf24.startWrite(mTxBuf, len, false); // false = request ACK response
+            mNrf24.startWrite(mTxBuf, len, NRF_REQACK_INVERSE); // false = request ACK response
 
             if(isRetransmit)
                 mRetransmits++;

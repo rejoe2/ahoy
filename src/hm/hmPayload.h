@@ -382,8 +382,15 @@ class HmPayload {
                                     yield();
                                 }
                             }
-                            if( (InverterDevInform_All == mPayload[iv->id].txCmd) && (mHighPrioIv == NULL) )      // process next request immediately if possible
+                            if( ( ( mPayload[iv->id].txCmd == InverterDevInform_All
+                                 || mPayload[iv->id].txCmd == AlarmData
+                                 || mPayload[iv->id].txCmd == InverterDevInform_Simple ) )
+                                && (mHighPrioIv == NULL) ) {
+                                // process next request immediately if possible
                                 mHighPrioIv = iv;
+                                DPRINT_IVID(DBG_INFO, iv->id);
+                                DBGPRINTLN(F("fast next req"));
+                            }
 
                         } else {
                             DPRINT(DBG_ERROR, F("plausibility check failed, expected "));

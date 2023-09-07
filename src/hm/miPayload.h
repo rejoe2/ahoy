@@ -27,6 +27,7 @@ typedef struct {
     uint8_t retransmits;
     uint8_t req_rtrnsmts; // for quality
     uint8_t multi_parts;  // for quality
+    bool evaluate_q;     // for quality
     bool gotFragment;
     bool rxTmo;
     uint8_t fragments;
@@ -136,12 +137,9 @@ class MiPayload {
                 mPayload[iv->id].limitrequested = true;
 
                 iv->clearCmdQueue();
-                iv->enqueCommand<InfoCommand>(SystemConfigPara); // try to read back power limit
+                //iv->enqueCommand<InfoCommand>(SystemConfigPara); // read back power limit is not possible with MI
             } else {
                 uint8_t cmd = iv->getQueuedCmd();
-                DPRINT_IVID(DBG_INFO, iv->id);
-                DBGPRINT(F("prepareDevInformCmd 0x"));
-                DBGHEXLN(cmd);
                 uint8_t cmd2 = cmd;
                 if ( cmd == SystemConfigPara ) { //0x05 for HM-types
                     if (!mPayload[iv->id].limitrequested) { // only do once at startup
@@ -154,11 +152,12 @@ class MiPayload {
 
                 if (cmd == 0x01 || cmd == SystemConfigPara ) { //0x1 and 0x05 for HM-types
                     cmd2 = cmd == SystemConfigPara ? 0x01 : 0x00;  //perhaps we can only try to get second frame?
-                    cmd  = 0x0f;                              // for MI, these seem to make part of the  Polling the device software and hardware version number command
-                    mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
-                } else {
-                    mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
-                };
+                    cmd  = 0x0f;                              // for MI, these seem to make part of polling the device software and hardware version number command
+                }
+                DPRINT_IVID(DBG_INFO, iv->id);
+                DBGPRINT(F("prepareDevInformCmd 0x"));
+                DBGHEXLN(cmd);
+                mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
 
                 mPayload[iv->id].txCmd = cmd;
                 if (iv->type == INV_TYPE_1CH || iv->type == INV_TYPE_2CH) {
@@ -194,128 +193,8 @@ class MiPayload {
 
             else if (p->packet[0] == ( 0x0f + ALL_FRAMES)) {
                 // MI response from get hardware information request
-                record_t<> *rec = iv->getRecordStruct(InverterDevInform_All);  // choose the record structure
-                rec->ts = mPayload[iv->id].ts;
-                mPayload[iv->id].gotFragment = true;
-                mPayload[iv->id].fragments++;
-
-                if(mHighPrioIv == NULL)                          // process next request immediately if possible
-                    mHighPrioIv = iv;
-
-/*
- Polling the device software and hardware version number command
- start byte	Command word	 routing address				 target address				 User data	 check	 end byte
- byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]
- 0x7e	 0x0f	 xx	 xx	 xx	 xx	 YY	 YY	 YY	 YY	 0x00	 CRC	 0x7f
- Command Receipt - First Frame
- start byte	Command word	 target address				 routing address				 Multi-frame marking	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 check	 end byte
- byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]	 byte[13]	 byte[14]	 byte[15]	 byte[16]	 byte[17]	 byte[18]	 byte[19]	 byte[20]	 byte[21]	 byte[22]	 byte[23]	 byte[24]	 byte[25]	 byte[26]	 byte[27]	 byte[28]
- 0x7e	 0x8f	 YY	 YY	 YY	 YY	 xx	 xx	 xx	 xx	 0x00	 USFWBuild_VER		 APPFWBuild_VER		 APPFWBuild_YYYY		 APPFWBuild_MMDD		 APPFWBuild_HHMM		 APPFW_PN				 HW_VER		 CRC	 0x7f
- Command Receipt - Second Frame
- start byte	Command word	 target address				 routing address				 Multi-frame marking	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 check	 end byte
- byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]	 byte[13]	 byte[14]	 byte[15]	 byte[16]	 byte[17]	 byte[18]	 byte[19]	 byte[20]	 byte[21]	 byte[22]	 byte[23]	 byte[24]	 byte[25]	 byte[26]	 byte[27]	 byte[28]
- 0x7e	 0x8f	 YY	 YY	 YY	 YY	 xx	 xx	 xx	 xx	 0x01	 HW_PN				 HW_FB_TLmValue		 HW_FB_ReSPRT		 HW_GridSamp_ResValule		 HW_ECapValue		 Matching_APPFW_PN				 CRC	 0x7f
- Command receipt - third frame
- start byte	Command word	 target address				 routing address				 Multi-frame marking	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 check	 end byte
- byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]	 byte[13]	 byte[14]	 byte[15]	 byte[16]	 byte[15]	 byte[16]	 byte[17]	 byte[18]
- 0x7e	 0x8f	 YY	 YY	 YY	 YY	 xx	 xx	 xx	 xx	 0x12	 APPFW_MINVER		 HWInfoAddr		 PNInfoCRC_gusv		 PNInfoCRC_gusv		 CRC	 0x7f
-*/
-
-/*
-case InverterDevInform_All:
-                    rec->length  = (uint8_t)(HMINFO_LIST_LEN);
-                    rec->assign  = (byteAssign_t *)InfoAssignment;
-                    rec->pyldLen = HMINFO_PAYLOAD_LEN;
-                    break;
-
-const byteAssign_t InfoAssignment[] = {
-    { FLD_FW_VERSION,           UNIT_NONE,   CH0,  0, 2, 1 },
-    { FLD_FW_BUILD_YEAR,        UNIT_NONE,   CH0,  2, 2, 1 },
-    { FLD_FW_BUILD_MONTH_DAY,   UNIT_NONE,   CH0,  4, 2, 1 },
-    { FLD_FW_BUILD_HOUR_MINUTE, UNIT_NONE,   CH0,  6, 2, 1 },
-    { FLD_BOOTLOADER_VER,       UNIT_NONE,   CH0,  8, 2, 1 }
-};
-*/
-
-                if ( p->packet[9] == 0x00 ) {//first frame
-                    //FLD_FW_VERSION
-                    for (uint8_t i = 0; i < 5; i++) {
-                        iv->setValue(i, rec, (float) ((p->packet[(12+2*i)] << 8) + p->packet[(13+2*i)])/1);
-                    }
-                    iv->isConnected = true;
-                    if(mSerialDebug) {
-                        DPRINT_IVID(DBG_INFO, iv->id);
-                        DPRINT(DBG_INFO,F("HW_VER is "));
-                        DBGPRINTLN(String((p->packet[24] << 8) + p->packet[25]));
-                    }
-                    record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
-                    rec->ts = mPayload[iv->id].ts;
-                    iv->setValue(1, rec, (uint32_t) ((p->packet[24] << 8) + p->packet[25])/1);
-                    //notify(InverterDevInform_All, iv);
-                    //28737
-                } else if ( p->packet[9] == 0x01 || p->packet[9] == 0x10 ) {//second frame for MI, 3rd gen. answers in 0x10
-                    DPRINT_IVID(DBG_INFO, iv->id);
-                    if ( p->packet[9] == 0x01 ) {
-                        DBGPRINTLN(F("got 2nd frame (hw info)"));
-                        /* according to xlsx (different start byte -1!)
-                        byte[11] to	 byte[14] HW_PN
-                        byte[15]	 byte[16] HW_FB_TLmValue
-                        byte[17]	 byte[18] HW_FB_ReSPRT
-                        byte[19]	 byte[20] HW_GridSamp_ResValule
-                        byte[21]	 byte[22] HW_ECapValue
-                        byte[23] to	 byte[26] Matching_APPFW_PN
-                    */
-
-                        DPRINT(DBG_INFO,F("HW_PartNo "));
-                        DBGPRINTLN(String((uint32_t) (((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13]));
-                        mPayload[iv->id].fragments++;
-                        record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
-                        rec->ts = mPayload[iv->id].ts;
-                        iv->setValue(0, rec, (uint32_t) ((((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13])/1);
-
-                        if(mSerialDebug) {
-                            DPRINT(DBG_INFO,F("HW_FB_TLmValue "));
-                            DBGPRINTLN(String((p->packet[14] << 8) + p->packet[15]));
-                            DPRINT(DBG_INFO,F("HW_FB_ReSPRT "));
-                            DBGPRINTLN(String((p->packet[16] << 8) + p->packet[17]));
-                            DPRINT(DBG_INFO,F("HW_GridSamp_ResValule "));
-                            DBGPRINTLN(String((p->packet[18] << 8) + p->packet[19]));
-                            DPRINT(DBG_INFO,F("HW_ECapValue "));
-                            DBGPRINTLN(String((p->packet[20] << 8) + p->packet[21]));
-                            DPRINT(DBG_INFO,F("Matching_APPFW_PN "));
-                            DBGPRINTLN(String((uint32_t) (((p->packet[22] << 8) | p->packet[23]) << 8 | p->packet[24]) << 8 | p->packet[25]));
-                        }
-                        //notify(InverterDevInform_Simple, iv);
-                        notify(InverterDevInform_All, iv);
-                    } else {
-                        DBGPRINTLN(F("3rd gen. inverter!"));           // see table in OpenDTU code, DevInfoParser.cpp devInfo[]
-                    }
-
-                } else if ( p->packet[9] == 0x12 ) {//3rd frame
-                    DPRINT_IVID(DBG_INFO, iv->id);
-                    DBGPRINTLN(F("got 3rd frame (hw info)"));
-                    /* according to xlsx (different start byte -1!)
-                        byte[11]	 byte[12] APPFW_MINVER
-                        byte[13]	 byte[14] HWInfoAddr
-                        byte[15]	 byte[16] PNInfoCRC_gusv
-                        byte[15]	 byte[16] PNInfoCRC_gusv
-                    */
-                    if(mSerialDebug) {
-                        DPRINT(DBG_INFO,F("APPFW_MINVER "));
-                        DBGPRINTLN(String((p->packet[10] << 8) + p->packet[11]));
-                        DPRINT(DBG_INFO,F("HWInfoAddr "));
-                        DBGPRINTLN(String((p->packet[12] << 8) + p->packet[13]));
-                        DPRINT(DBG_INFO,F("PNInfoCRC_gusv "));
-                        DBGPRINTLN(String((p->packet[14] << 8) + p->packet[15]));
-                        DPRINT(DBG_INFO,F("PNInfoCRC_gusv (pt. 2?) "));
-                        DBGPRINTLN(String((p->packet[16] << 8) + p->packet[17]));
-                    }
-                    iv->setQueuedCmdFinished();
-                    mPayload[iv->id].complete = true;
-                    mPayload[iv->id].rxTmo    = true;
-                    mPayload[iv->id].requested= false;
-                    mStat->rxSuccess++;
-                }
+                miHwDecode(iv, p);
+                mPayload[iv->id].txId = p->packet[0];
 
             } else if ( p->packet[0] == (TX_REQ_INFO + ALL_FRAMES) // response from get information command
                      || (p->packet[0] == 0xB6 && mPayload[iv->id].txCmd != 0x36)) {                   // strange short response from MI-1500 3rd gen; might be misleading!
@@ -333,23 +212,7 @@ const byteAssign_t InfoAssignment[] = {
                     iv->ivGen = IV_HM;
                     iv->setQueuedCmdFinished();
                     iv->clearCmdQueue();
-                    //DPRINTLN(DBG_DEBUG, "PID: 0x" + String(*pid, HEX));
-                    /* (old else-tree)
-                    if ((*pid & 0x7F) < MAX_PAYLOAD_ENTRIES) {^
-                        memcpy(mPayload[iv->id].data[(*pid & 0x7F) - 1], &p->packet[10], p->len - 11);
-                        mPayload[iv->id].len[(*pid & 0x7F) - 1] = p->len - 11;
-                        mPayload[iv->id].gotFragment = true;
-                    }
-                    if ((*pid & ALL_FRAMES) == ALL_FRAMES) {
-                        // Last packet
-                        if (((*pid & 0x7f) > mPayload[iv->id].maxPackId) || (MAX_PAYLOAD_ENTRIES == mPayload[iv->id].maxPackId)) {
-                            mPayload[iv->id].maxPackId = (*pid & 0x7f);
-                            if (*pid > 0x81)
-                                mPayload[iv->id].lastFound = true;
-                        }
-                    }*/
                 }
-            //}
             } else if (p->packet[0] == (TX_REQ_DEVCONTROL + ALL_FRAMES )       // response from dev control command
                     || p->packet[0] == (TX_REQ_DEVCONTROL + ALL_FRAMES -1)) {  // response from DRED instruction
                 DPRINT_IVID(DBG_DEBUG, iv->id);
@@ -426,6 +289,46 @@ const byteAssign_t InfoAssignment[] = {
             }
         }
 
+/* Excert from NRF24_DTUMIesp.ino
+
+void MIAnalysePacket(NRF24_packet_t *p,uint8_t payloadLen){
+//--------------------------------------------------------------------------------------------------
+  switch (p->packet[2])  {
+    case 0xD1:
+      TxLimitSts=0;//stop sending Limit
+      DEBUG_OUT.printf("Limiting(0x51) is ok CMD:%X  RxCH:%i   TxLimitSts ack ---- %i\r\n",p->packet[2],RxCH,TxLimitSts);
+      timeLastAck = millis();
+      RxAckTimeOut = TIMEOUTRXACK;
+      pvCnt[0]=pvCnt[1]=pvCnt[2]=pvCnt[3]=0; //reset PV;sts
+      break;
+//    case 0x82: //Gongfa
+//      DEBUG_OUT.print (F("Gongfa(0x2) is ok CMD="));
+//      DEBUG_OUT.println(p->packet[2], HEX);
+//      dumpData(&p->packet[3], payloadLen);
+//      SerCmd=0; //stop sending
+//      break;
+....
+
+void RFisTime2Send (void) {
+//----------------------------------------------------------------------------------------------------------------------
+  ...
+
+  if (millis() >= UpdateTxMsgTick) {
+
+    .....
+
+    switch(telegram) {
+      case 0:
+        //set SubCmd and  UsrData Limiting
+        if ((TxLimitSts) && (abs (GridPower) > TOLERANCE)) {        //Limitierung ????chek it again
+          Cmd=0x51;
+          DEBUG_OUT.printf("CMD:%03X CH:%i Sts:%4i Setting Limit:%i\r\n",Cmd, TxCH,TxLimitSts,Limit);
+          UsrData[0]=0x5A;UsrData[1]=0x5A;UsrData[2]=100;//0x0a;// 10% limit
+          UsrData[3]=((Limit*10) >> 8) & 0xFF;   UsrData[4]= (Limit*10)  & 0xFF;   //WR needs 1 dec= zB 100.1 W
+          size = hmPackets.GetCmdPacket((uint8_t *)&sendBuf, dest >> 8, DTU_RADIO_ID >> 8, Cmd, UsrData,5);
+          //Limit=0; will be set after ack limiting
+          }
+*/
         void process(bool retransmit) {
             for (uint8_t id = 0; id < mSys->getNumInverters(); id++) {
                 Inverter<> *iv = mSys->getInverterByPos(id);
@@ -443,7 +346,8 @@ const byteAssign_t InfoAssignment[] = {
                     (mPayload[iv->id].txId != (0x11 + ALL_FRAMES)) &&
                     (mPayload[iv->id].txId != (0x88)) &&
                     (mPayload[iv->id].txId != (0x92)) &&
-                    (mPayload[iv->id].txId != 0 )) {
+                    (mPayload[iv->id].txId != 0 &&
+                    mPayload[iv->id].txCmd != 0x0f)) {
                     // no processing needed if txId is not one of 0x95, 0x88, 0x89, 0x91, 0x92 or response to 0x36ff
                     mPayload[iv->id].complete = true;
                     mPayload[iv->id].rxTmo = true;
@@ -451,13 +355,13 @@ const byteAssign_t InfoAssignment[] = {
                 }
 
                 if (!mPayload[iv->id].complete) {
-                    bool gotAllMsgParts, pyldComplete;
-                    gotAllMsgParts = build(iv->id, &pyldComplete);
+                    bool gotAllMsgParts, pyldComplete, fastNext;
+                    gotAllMsgParts = build(iv, &pyldComplete, &fastNext);
 
                     // evaluate quality of send channel with rcv params
                     if ( (retransmit) && (mPayload[iv->id].requested)
-                          && ( (mPayload[iv->id].retransmits < mMaxRetrans) || gotAllMsgParts )
-                          && (mPayload[iv->id].txCmd != 0x0f) ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
+                          && (mPayload[iv->id].retransmits < mMaxRetrans)
+                          && !gotAllMsgParts ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
 
                         //iv->evalTxChanQuality (gotAllMsgParts, mPayload[iv->id].retransmits,
                         bool allParts;
@@ -470,14 +374,9 @@ const byteAssign_t InfoAssignment[] = {
                                 qFrag = mPayload[iv->id].req_rtrnsmts;
                             }
                         }
-                        iv->evalTxChanQuality ( allParts, mPayload[iv->id].req_rtrnsmts,
-                            qFrag, mPayload[iv->id].lastFragments);
-                        DPRINT_IVID(DBG_INFO, iv->id);
-                        DBGPRINT("Quality: ");
-                        iv->dumpTxChanQuality();
-                        DBGPRINT(" multi: ");
-                        DBGPRINTLN(allParts ? "OK":"fail");
-                        //DBGPRINTLN("");
+                        if (mPayload[iv->id].evaluate_q)
+                            miEvalTxChanQuality (iv, allParts, mPayload[iv->id].req_rtrnsmts,
+                                qFrag, mPayload[iv->id].lastFragments);
                     }
 
                     mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
@@ -567,7 +466,19 @@ const byteAssign_t InfoAssignment[] = {
                             mPayload[iv->id].rxTmo = true;
                         }
                     } else {
-                        mPayload[iv->id].rxTmo = true;
+                        if (!fastNext) {
+                            mPayload[iv->id].rxTmo = true;
+                        } else {
+                            uint8_t cmd = iv->getQueuedCmd();
+                            DPRINT_IVID(DBG_INFO, iv->id);
+                            DBGPRINT(F("fast mode "));
+                            DBGPRINT(F("prepareDevInformCmd 0x"));
+                            DBGHEXLN(cmd);
+                            //mRadio->prepareDevInformCmd(iv->radioId.u64, cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
+                            mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(),
+                                iv->getNextTxChanIndex(), cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
+                            mPayload[iv->id].txCmd = cmd;
+                        }
                     }
                 } else {
                     mPayload[iv->id].rxTmo = true;
@@ -589,15 +500,15 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[iv->id].gotFragment = true;
             mPayload[iv->id].fragments++;
             mPayload[iv->id].multi_parts += 3;
+            mPayload[iv->id].evaluate_q = true;
             mPayload[iv->id].txId = p->packet[0];
             miStsConsolidate(iv, stschan, rec, p->packet[10], p->packet[12], p->packet[9], p->packet[11]);
             mPayload[iv->id].stsAB[stschan] = true;
             if (mPayload[iv->id].stsAB[CH1] && mPayload[iv->id].stsAB[CH2])
                 mPayload[iv->id].stsAB[CH0] = true;
-            //mPayload[iv->id].skipfirstrepeat = 1;
-            if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0] && !mPayload[iv->id].complete) {
-                miComplete(iv);
-            }
+            //if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0] && !mPayload[iv->id].complete) {
+            //    miComplete(iv);
+           //}
         }
 
         void miStsConsolidate(Inverter<> *iv, uint8_t stschan,  record_t<> *rec, uint8_t uState, uint8_t uEnum, uint8_t lState = 0, uint8_t lEnum = 0) {
@@ -684,59 +595,47 @@ const byteAssign_t InfoAssignment[] = {
 
             if ( datachan < 3 ) {
                 mPayload[iv->id].dataAB[datachan] = true;
+                if ( p->packet[0] == 0x89 || p->packet[0] == 0x91 ) {
+                    if ( mPayload[iv->id].multi_parts == 7 ) {
+                        miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+                        mPayload[iv->id].evaluate_q = false;
+                    }
+                }
             }
             if ( !mPayload[iv->id].dataAB[CH0] && mPayload[iv->id].dataAB[CH1] && mPayload[iv->id].dataAB[CH2] ) {
                 mPayload[iv->id].dataAB[CH0] = true;
             }
 
             if (p->packet[0] >= (0x36 + ALL_FRAMES) ) {
-
                 /*For MI1500:
                 if (MI1500) {
                   STAT = (uint8_t)(p->packet[25] );
                   FCNT = (uint8_t)(p->packet[26]);
                   FCODE = (uint8_t)(p->packet[27]);
                 }*/
-
-                /*uint16_t status = (uint8_t)(p->packet[23]);
-                mPayload[iv->id].sts[datachan] = status;
-                if ( !mPayload[iv->id].sts[0] || status < mPayload[iv->id].sts[0]) {
-                    mPayload[iv->id].sts[0] = status;
-                    iv->setValue(iv->getPosByChFld(0, FLD_EVT, rec), rec, status);
-                }*/
                 miStsConsolidate(iv, datachan, rec, p->packet[23], p->packet[24]);
+                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
 
                 if (p->packet[0] < (0x39 + ALL_FRAMES) ) {
                     mPayload[iv->id].txCmd++;
                     mPayload[iv->id].retransmits = 0; // reserve retransmissions for each response
                     mPayload[iv->id].complete = false;
+                    if(mHighPrioIv == NULL)
+                        mHighPrioIv = iv; // process next request immediately if possible
+                } else {
+                    miComplete(iv);
+                    miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
                 }
             }
 
-/*
-                            if(AlarmData == mPayload[iv->id].txCmd) {
-                                uint8_t i = 0;
-                                uint16_t code;
-                                uint32_t start, end;
-                                while(1) {
-                                    code = iv->parseAlarmLog(i++, payload, payloadLen, &start, &end);
-                                    if(0 == code)
-                                        break;
-                                    if (NULL != mCbAlarm)
-                                        (mCbAl    { FLD_YT,  UNIT_KWH,  CH0, CALC_YT_CH0,   0, CMD_CALC },
-
-                            }*/
-
-            //if ( mPayload[iv->id].complete ||  //4ch device
-            if ( p->packet[0] == (0x39 + ALL_FRAMES) ||  //4ch device - last message
-                 (iv->type != INV_TYPE_4CH               //other devices
+            /*if ( iv->type != INV_TYPE_4CH               //other devices
                  && mPayload[iv->id].dataAB[CH0]
-                 && mPayload[iv->id].stsAB[CH0])) {
-                     miComplete(iv);
-        }
+                 && mPayload[iv->id].stsAB[CH0] ) {
+                miComplete(iv, mPayload[iv->id].multi_parts == 7);
+            }*/
         }
 
-        void miComplete(Inverter<> *iv) {
+        void miComplete(Inverter<> *iv) { //}, bool allFrames=true) {
             if ( mPayload[iv->id].complete )
                 return; //if we got second message as well in repreated attempt
             mPayload[iv->id].complete = true;
@@ -761,34 +660,52 @@ const byteAssign_t InfoAssignment[] = {
             iv->isProducing();
 
             iv->setQueuedCmdFinished();
+            /*if (!allFrames) {
+                DPRINTLN(DBG_INFO, F("0x88/0x92 missed"));
+                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
+                mPayload[iv->id].evaluate_q = false;
+            }*/
             mStat->rxSuccess++;
-
-            iv->evalTxChanQuality( true, mPayload[iv->id].req_rtrnsmts,
-                mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
-
-            DPRINT_IVID(DBG_INFO, iv->id);
-            DBGPRINT("Quality: ");
-            iv->dumpTxChanQuality();
-            DBGPRINTLN("");
-            mPayload[iv->id].requested = false;
             yield();
             notify(RealTimeRunData_Debug, iv);
         }
 
-        bool build(uint8_t id, bool *complete) {
+        bool build(Inverter<> *iv, bool *complete, bool *fastNext ) {
             DPRINTLN(DBG_VERBOSE, F("build"));
             // check if all messages are there
 
-            *complete = mPayload[id].complete;
-            uint8_t txCmd = mPayload[id].txCmd;
+            *complete = mPayload[iv->id].complete;
+            *fastNext = false;
+            uint8_t txCmd = mPayload[iv->id].txCmd;
 
             if(!*complete) {
                 DPRINTLN(DBG_VERBOSE, F("incomlete, txCmd is 0x") + String(txCmd, HEX));
                 //DBGHEXLN(txCmd);
-                if (txCmd == 0x09 || txCmd == 0x11 || (txCmd >= 0x36 && txCmd <= 0x39))
+                if (txCmd == 0x09 || txCmd == 0x11)
+                    if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0]) {
+                      miComplete(iv);
+                      mPayload[iv->id].evaluate_q = true;
+                      return true;
+                    }
                     return false;
+                if (txCmd >= 0x36 && txCmd <= 0x39) {
+                    mPayload[iv->id].evaluate_q = true;
+                     if (txCmd != 0x39)
+                        *fastNext = true;
+                    return false;
+                }
+                if (txCmd == 0x0f) {  //hw info request, at least hw part nr. and version have to be there...
+                    bool gotRelevant = iv->getFwVersion()
+                        && iv->getChannelFieldValue(CH0, FLD_PART_NUM, iv->getRecordStruct(InverterDevInform_Simple));
+                    if (gotRelevant)
+                        *fastNext = true;
+                    return gotRelevant;
+                }
             }
 
+            //check if we want the next request to be done faster
+            if (txCmd == 0x0f)
+                *fastNext = true;
             return true;
         }
 
@@ -813,6 +730,138 @@ const byteAssign_t InfoAssignment[] = {
         }
 */
 
+        void miHwDecode(Inverter<> *iv, packet_t *p ) {
+            //DPRINTLN(DBG_INFO, F("(#") + String(iv->id) + F(") status msg 0x") + String(p->packet[0], HEX));
+            record_t<> *rec = iv->getRecordStruct(InverterDevInform_All);  // choose the record structure
+            rec->ts = mPayload[iv->id].ts;
+            mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
+
+//            if(mHighPrioIv == NULL)                          // process next request immediately if possible
+//                mHighPrioIv = iv;
+
+/*
+Polling the device software and hardware version number command
+start byte	Command word	 routing address				 target address				 User data	 check	 end byte
+byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]
+0x7e	 0x0f	 xx	 xx	 xx	 xx	 YY	 YY	 YY	 YY	 0x00	 CRC	 0x7f
+Command Receipt - First Frame
+start byte	Command word	 target address				 routing address				 Multi-frame marking	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 check	 end byte
+byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]	 byte[13]	 byte[14]	 byte[15]	 byte[16]	 byte[17]	 byte[18]	 byte[19]	 byte[20]	 byte[21]	 byte[22]	 byte[23]	 byte[24]	 byte[25]	 byte[26]	 byte[27]	 byte[28]
+0x7e	 0x8f	 YY	 YY	 YY	 YY	 xx	 xx	 xx	 xx	 0x00	 USFWBuild_VER		 APPFWBuild_VER		 APPFWBuild_YYYY		 APPFWBuild_MMDD		 APPFWBuild_HHMM		 APPFW_PN				 HW_VER		 CRC	 0x7f
+Command Receipt - Second Frame
+start byte	Command word	 target address				 routing address				 Multi-frame marking	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 check	 end byte
+byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]	 byte[13]	 byte[14]	 byte[15]	 byte[16]	 byte[17]	 byte[18]	 byte[19]	 byte[20]	 byte[21]	 byte[22]	 byte[23]	 byte[24]	 byte[25]	 byte[26]	 byte[27]	 byte[28]
+0x7e	 0x8f	 YY	 YY	 YY	 YY	 xx	 xx	 xx	 xx	 0x01	 HW_PN				 HW_FB_TLmValue		 HW_FB_ReSPRT		 HW_GridSamp_ResValule		 HW_ECapValue		 Matching_APPFW_PN				 CRC	 0x7f
+Command receipt - third frame
+start byte	Command word	 target address				 routing address				 Multi-frame marking	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 User data	 check	 end byte
+byte[0]	 byte[1]	 byte[2]	 byte[3]	 byte[4]	 byte[5]	 byte[6]	 byte[7]	 byte[8]	 byte[9]	 byte[10]	 byte[11]	 byte[12]	 byte[13]	 byte[14]	 byte[15]	 byte[16]	 byte[15]	 byte[16]	 byte[17]	 byte[18]
+0x7e	 0x8f	 YY	 YY	 YY	 YY	 xx	 xx	 xx	 xx	 0x12	 APPFW_MINVER		 HWInfoAddr		 PNInfoCRC_gusv		 PNInfoCRC_gusv		 CRC	 0x7f
+*/
+
+/*
+case InverterDevInform_All:
+            rec->length  = (uint8_t)(HMINFO_LIST_LEN);
+            rec->assign  = (byteAssign_t *)InfoAssignment;
+            rec->pyldLen = HMINFO_PAYLOAD_LEN;
+            break;
+
+const byteAssign_t InfoAssignment[] = {
+{ FLD_FW_VERSION,           UNIT_NONE,   CH0,  0, 2, 1 },
+{ FLD_FW_BUILD_YEAR,        UNIT_NONE,   CH0,  2, 2, 1 },
+{ FLD_FW_BUILD_MONTH_DAY,   UNIT_NONE,   CH0,  4, 2, 1 },
+{ FLD_FW_BUILD_HOUR_MINUTE, UNIT_NONE,   CH0,  6, 2, 1 },
+{ FLD_BOOTLOADER_VER,       UNIT_NONE,   CH0,  8, 2, 1 }
+};
+*/
+
+            if ( p->packet[9] == 0x00 ) {//first frame
+                //FLD_FW_VERSION
+                for (uint8_t i = 0; i < 5; i++) {
+                    iv->setValue(i, rec, (float) ((p->packet[(12+2*i)] << 8) + p->packet[(13+2*i)])/1);
+                }
+                iv->isConnected = true;
+                if(mSerialDebug) {
+                    DPRINT_IVID(DBG_INFO, iv->id);
+                    DPRINT(DBG_INFO,F("HW_VER is "));
+                    DBGPRINTLN(String((p->packet[24] << 8) + p->packet[25]));
+                }
+                record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
+                rec->ts = mPayload[iv->id].ts;
+                iv->setValue(1, rec, (uint32_t) ((p->packet[24] << 8) + p->packet[25])/1);
+                mPayload[iv->id].multi_parts +=4;
+                //notify(InverterDevInform_All, iv);
+                //28737
+            } else if ( p->packet[9] == 0x01 || p->packet[9] == 0x10 ) {//second frame for MI, 3rd gen. answers in 0x10
+                DPRINT_IVID(DBG_INFO, iv->id);
+                if ( p->packet[9] == 0x01 ) {
+                    DBGPRINTLN(F("got 2nd frame (hw info)"));
+                    /* according to xlsx (different start byte -1!)
+                    byte[11] to	 byte[14] HW_PN
+                    byte[15]	 byte[16] HW_FB_TLmValue
+                    byte[17]	 byte[18] HW_FB_ReSPRT
+                    byte[19]	 byte[20] HW_GridSamp_ResValule
+                    byte[21]	 byte[22] HW_ECapValue
+                    byte[23] to	 byte[26] Matching_APPFW_PN
+                */
+
+                    DPRINT(DBG_INFO,F("HW_PartNo "));
+                    DBGPRINTLN(String((uint32_t) (((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13]));
+                    record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
+                    rec->ts = mPayload[iv->id].ts;
+                    iv->setValue(0, rec, (uint32_t) ((((p->packet[10] << 8) | p->packet[11]) << 8 | p->packet[12]) << 8 | p->packet[13])/1);
+
+                    if(mSerialDebug) {
+                        DPRINT(DBG_INFO,F("HW_FB_TLmValue "));
+                        DBGPRINTLN(String((p->packet[14] << 8) + p->packet[15]));
+                        DPRINT(DBG_INFO,F("HW_FB_ReSPRT "));
+                        DBGPRINTLN(String((p->packet[16] << 8) + p->packet[17]));
+                        DPRINT(DBG_INFO,F("HW_GridSamp_ResValule "));
+                        DBGPRINTLN(String((p->packet[18] << 8) + p->packet[19]));
+                        DPRINT(DBG_INFO,F("HW_ECapValue "));
+                        DBGPRINTLN(String((p->packet[20] << 8) + p->packet[21]));
+                        DPRINT(DBG_INFO,F("Matching_APPFW_PN "));
+                        DBGPRINTLN(String((uint32_t) (((p->packet[22] << 8) | p->packet[23]) << 8 | p->packet[24]) << 8 | p->packet[25]));
+                    }
+                    //notify(InverterDevInform_Simple, iv);
+                    mPayload[iv->id].multi_parts +=2;
+                    notify(InverterDevInform_All, iv);
+                } else {
+                    DBGPRINTLN(F("3rd gen. inverter!"));           // see table in OpenDTU code, DevInfoParser.cpp devInfo[]
+                }
+
+            } else if ( p->packet[9] == 0x12 ) {//3rd frame
+                DPRINT_IVID(DBG_INFO, iv->id);
+                DBGPRINTLN(F("got 3rd frame (hw info)"));
+                /* according to xlsx (different start byte -1!)
+                    byte[11]	 byte[12] APPFW_MINVER
+                    byte[13]	 byte[14] HWInfoAddr
+                    byte[15]	 byte[16] PNInfoCRC_gusv
+                    byte[15]	 byte[16] PNInfoCRC_gusv
+                */
+                if(mSerialDebug) {
+                    DPRINT(DBG_INFO,F("APPFW_MINVER "));
+                    DBGPRINTLN(String((p->packet[10] << 8) + p->packet[11]));
+                    DPRINT(DBG_INFO,F("HWInfoAddr "));
+                    DBGPRINTLN(String((p->packet[12] << 8) + p->packet[13]));
+                    DPRINT(DBG_INFO,F("PNInfoCRC_gusv "));
+                    DBGPRINTLN(String((p->packet[14] << 8) + p->packet[15]));
+                    DPRINT(DBG_INFO,F("PNInfoCRC_gusv (pt. 2?) "));
+                    DBGPRINTLN(String((p->packet[16] << 8) + p->packet[17]));
+                }
+                mPayload[iv->id].multi_parts++;
+            }
+            if (mPayload[iv->id].multi_parts > 5) {
+                //|| ( iv->getChannelFieldValue(CH0, FLD_PART_NUM, iv->getRecordStruct(InverterDevInform_Simple)) && iv->getFwVersion())) {
+                iv->setQueuedCmdFinished();
+                mPayload[iv->id].complete = true;
+                mPayload[iv->id].rxTmo    = true;
+                mPayload[iv->id].requested= false;
+                mStat->rxSuccess++;
+                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+            }
+        }
+
         void reset(uint8_t id, bool clrSts = false) {
             DPRINT_IVID(DBG_INFO, id);
             DBGPRINTLN(F("resetPayload"));
@@ -825,6 +874,7 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].req_rtrnsmts = 0;
             mPayload[id].multi_parts  = 0;
             mPayload[id].complete    = false;
+            mPayload[id].evaluate_q  = true;
             mPayload[id].dataAB[CH0] = true; //required for 1CH and 2CH devices
             mPayload[id].dataAB[CH1] = true; //required for 1CH and 2CH devices
             mPayload[id].dataAB[CH2] = true; //only required for 2CH devices
@@ -845,6 +895,15 @@ const byteAssign_t InfoAssignment[] = {
             }
         }
 
+
+        void miEvalTxChanQuality (Inverter<> *iv, bool gotAll, uint8_t Retransmits, uint8_t rxFragments,
+            uint8_t lastRxFragments) {
+            iv->evalTxChanQuality( gotAll, Retransmits, rxFragments, lastRxFragments);
+            DPRINT_IVID(DBG_INFO, iv->id);
+            DBGPRINT("Quality: ");
+            iv->dumpTxChanQuality();
+            DBGPRINTLN("");
+        }
 
 
         IApp *mApp;

@@ -25,6 +25,7 @@ typedef struct {
     uint8_t txId;
     uint8_t invId;
     uint8_t retransmits;
+    uint8_t rtrRes; // for limiting resets
     uint8_t req_rtrnsmts; // for quality
     uint8_t multi_parts;  // for quality
     bool evaluate_q;     // for quality
@@ -89,7 +90,7 @@ class MiPayload {
                     if (!mPayload[iv->id].complete)
                         process(false); // no retransmit
 
-                    if (!mPayload[iv->id].complete) {
+                    if (!mPayload[iv->id].complete && mPayload[iv->id].rxTmo) {
                         if (mSerialDebug)
                             DPRINT_IVID(DBG_INFO, iv->id);
                         if (!mPayload[iv->id].gotFragment) {
@@ -397,11 +398,15 @@ void RFisTime2Send (void) {
                                 if (mPayload[iv->id].retransmits < mMaxRetrans) {
                                     mPayload[iv->id].retransmits++;
                                     mPayload[iv->id].req_rtrnsmts++;
-                                    if( !mPayload[iv->id].gotFragment ) {
+                                    if( !mPayload[iv->id].gotFragment && mPayload[iv->id].rxTmo ) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
                                         mPayload[iv->id].retransmits = mMaxRetrans;
+                                    } else if( !mPayload[iv->id].gotFragment && !mPayload[iv->id].rxTmo ) {
+                                        DPRINT_IVID(DBG_INFO, iv->id);
+                                        DBGPRINTLN(F("retransmit on failed first request"));
                                         mPayload[iv->id].rxTmo = true;
+                                        mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd, true, false);
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
                                         mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), 0x0f, 0x00, true, false);
@@ -410,6 +415,7 @@ void RFisTime2Send (void) {
                                         bool change = false;
                                         if ( cmd >= 0x36 && cmd < 0x39 ) { // MI-1500 Data command
                                             if (cmd > 0x36 && mPayload[iv->id].retransmits==1) // first request for the upper channels
+                                                mMaxRetrans++; // some more retransmit flexibitity
                                                 change = true;
                                         } else if ( cmd == 0x09 ) {//MI single or dual channel device
                                             if ( mPayload[iv->id].dataAB[CH1] && iv->type == INV_TYPE_2CH  ) {
@@ -418,7 +424,8 @@ void RFisTime2Send (void) {
                                                 else if (!mPayload[iv->id].stsAB[CH2] || !mPayload[iv->id].dataAB[CH2] ) {
                                                     cmd = 0x11;
                                                     change = true;
-                                                    mPayload[iv->id].retransmits = 0; //reset counter
+                                                    if (mPayload[iv->id].rtrRes < 3) //only get back to first channel twice
+                                                        mPayload[iv->id].retransmits = 0; //reset counter
                                                 }
                                             }
                                         } else if ( cmd == 0x11) {
@@ -432,9 +439,9 @@ void RFisTime2Send (void) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         if (change) {
                                             DBGPRINT(F("next request is"));
-                                            //mPayload[iv->id].skipfirstrepeat = 0;
                                             mPayload[iv->id].txCmd = cmd;
                                             mPayload[iv->id].req_rtrnsmts = 0;
+                                            mPayload[iv->id].rtrRes++;
                                         } else {
                                             DBGPRINT(F("sth."));
                                             DBGPRINT(F(" missing: Request Retransmit"));
@@ -594,7 +601,7 @@ void RFisTime2Send (void) {
                 mPayload[iv->id].dataAB[datachan] = true;
                 if ( p->packet[0] == 0x89 || p->packet[0] == 0x91 ) {
                     if ( mPayload[iv->id].multi_parts == 7 ) {
-                        miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+                        miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0);
                         mPayload[iv->id].evaluate_q = false;
                     }
                 }
@@ -860,6 +867,7 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].rxTmo     = false;// design: don't start with complete retransmit
             mPayload[id].lastFragments = 0;  // for send channel quality measurement
             mPayload[id].retransmits = 0;
+            mPayload[id].rtrRes      = 0;
             mPayload[id].req_rtrnsmts = 0;
             mPayload[id].multi_parts  = 0;
             mPayload[id].complete    = false;

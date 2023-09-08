@@ -242,9 +242,9 @@ class HmPayload {
                 }
 
                 if (!mPayload[iv->id].complete) {
-                    bool crcPass, pyldComplete;
+                    bool crcPass, pyldComplete, fastNext;
                     uint8_t Fragments;
-                    crcPass = build(iv->id, &pyldComplete, &Fragments);
+                    crcPass = build(iv, &pyldComplete, &Fragments, &fastNext);
                     //crcPass = build(iv->id, &pyldComplete);
                     // evaluate quality of send channel with rcv params
                     if ( (retransmit) && (mPayload[iv->id].requested) && (mPayload[iv->id].retransmits < mMaxRetrans) ) { //mPayload[iv->id].requested) && (!mPayload[iv->id].rxTmo) ) {// (!mPayload[iv->id].rxTmo) && (!pyldComplete) ) { //(mPayload[iv->id].requested) &&
@@ -382,14 +382,15 @@ class HmPayload {
                                     yield();
                                 }
                             }
-                            if( ( ( mPayload[iv->id].txCmd == InverterDevInform_All
-                                 || mPayload[iv->id].txCmd == AlarmData
-                                 || mPayload[iv->id].txCmd == InverterDevInform_Simple ) )
-                                && (mHighPrioIv == NULL) ) {
-                                // process next request immediately if possible
-                                mHighPrioIv = iv;
+                            if (fastNext) {
+                                uint8_t cmd = iv->getQueuedCmd();
                                 DPRINT_IVID(DBG_INFO, iv->id);
-                                DBGPRINTLN(F("fast next req"));
+                                DBGPRINT(F("fast mode "));
+                                DBGPRINT(F("prepareDevInformCmd 0x"));
+                                DBGHEXLN(cmd);
+                                mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(),
+                                    iv->getNextTxChanIndex(), cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
+                                mPayload[iv->id].txCmd = cmd;
                             }
 
                         } else {
@@ -412,16 +413,17 @@ class HmPayload {
                 (mCbPayload)(val, iv);
         }
 
-        bool build(uint8_t id, bool *complete, uint8_t *fragments) {
+        bool build(Inverter<> *iv, bool *complete, uint8_t *fragments, bool *fastNext ) {
             DPRINTLN(DBG_VERBOSE, F("build"));
             uint16_t crc = 0xffff, crcRcv = 0x0000;
-            if (mPayload[id].maxPackId > MAX_PAYLOAD_ENTRIES)
-                mPayload[id].maxPackId = MAX_PAYLOAD_ENTRIES;
+            if (mPayload[iv->id].maxPackId > MAX_PAYLOAD_ENTRIES)
+                mPayload[iv->id].maxPackId = MAX_PAYLOAD_ENTRIES;
 
             // check if all fragments are there
             *complete = true;
-            for (uint8_t i = 0; i < mPayload[id].maxPackId; i++) {
-                if(mPayload[id].len[i] == 0) {
+            *fastNext = false;
+            for (uint8_t i = 0; i < mPayload[iv->id].maxPackId; i++) {
+                if(mPayload[iv->id].len[i] == 0) {
                     *complete = false;
                 } else {
                     (*fragments)++;
@@ -430,18 +432,35 @@ class HmPayload {
             if(!*complete)
                 return false;
 
-            for (uint8_t i = 0; i < mPayload[id].maxPackId; i++) {
-                if (mPayload[id].len[i] > 0) {
-                    if (i == (mPayload[id].maxPackId - 1)) {
-                        crc = ah::crc16(mPayload[id].data[i], mPayload[id].len[i] - 2, crc);
-                        crcRcv = (mPayload[id].data[i][mPayload[id].len[i] - 2] << 8) | (mPayload[id].data[i][mPayload[id].len[i] - 1]);
+            for (uint8_t i = 0; i < mPayload[iv->id].maxPackId; i++) {
+                if (mPayload[iv->id].len[i] > 0) {
+                    if (i == (mPayload[iv->id].maxPackId - 1)) {
+                        crc = ah::crc16(mPayload[iv->id].data[i], mPayload[iv->id].len[i] - 2, crc);
+                        crcRcv = (mPayload[iv->id].data[i][mPayload[iv->id].len[i] - 2] << 8) | (mPayload[iv->id].data[i][mPayload[iv->id].len[i] - 1]);
                     } else
-                        crc = ah::crc16(mPayload[id].data[i], mPayload[id].len[i], crc);
+                        crc = ah::crc16(mPayload[iv->id].data[i], mPayload[iv->id].len[i], crc);
                 }
                 yield();
             }
 
-            return (crc == crcRcv) ? true : false;
+            //return (crc == crcRcv) ? true : false;
+            if (crc != crcRcv)
+                return false;
+
+            //requests to cause the next request to be executed immediately
+            if ( mPayload[iv->id].txCmd < 11 || mPayload[iv->id].txCmd > 18
+/*                InverterDevInform_All    == mPayload[iv->id].txCmd
+              || InverterDevInform_Simple == mPayload[iv->id].txCmd
+              || AlarmData                == mPayload[iv->id].txCmd
+
+              SystemConfigPara */
+               ) {
+                *fastNext = true;
+                DPRINT_IVID(DBG_INFO, iv->id);
+                DBGPRINTLN(F("fast next req"));
+            }
+
+            return true;
         }
 
         void reset(uint8_t id) {

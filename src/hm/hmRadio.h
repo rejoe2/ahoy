@@ -22,7 +22,7 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
-#define NRF_REQACK_INVERSE true // true switches to multicast method in startWrite(). Tries to overcome a potential bug in the RF24 lib, see https://github.com/nRF24/RF24/issues/877?
+#define NRF_REQACK_INVERSE false // true switches to multicast method in startWrite(). Tries to overcome a potential bug in the RF24 lib, see https://github.com/nRF24/RF24/issues/877?
 
 const char* const rf24AmpPowerNames[] = {"MIN", "LOW", "HIGH", "MAX"};
 

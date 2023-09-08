@@ -839,16 +839,6 @@ class Inverter {
             DBGPRINT (", Cnt " + String (mTestPeriodSendCnt) + ", Fail " + String (mTestPeriodFailCnt));
         }
 
-        void cleanupRxInfo()
-        {
-            // design: every day a new start
-            //alarmCode = 0;
-            recordMeas.ts = 0;
-            recordInfo.ts = 0;
-            recordConfig.ts = 0;
-            recordAlarm.ts = 0;
-        }
-
     private:
         inline void addAlarm(uint16_t code, uint32_t start, uint32_t end) {
             lastAlarm[alarmNxtWrPos] = alarm_t(code, start, end);

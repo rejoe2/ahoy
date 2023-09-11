@@ -26,8 +26,9 @@ typedef struct {
     uint8_t invId;
     uint8_t retransmits;
     bool gotFragment;
-    uint8_t rtrRes; // for limiting resets
-    uint8_t multi_parts;  // for quality
+    uint8_t rtrRes; // for limiting retransmit resets
+    bool rxTmo;
+    uint8_t multi_parts;
 } miPayload_t;
 
 
@@ -47,7 +48,7 @@ class MiPayload {
             mMaxRetrans = maxRetransmits;
             mTimestamp  = timestamp;
             for(uint8_t i = 0; i < MAX_NUM_INVERTERS; i++) {
-                reset(i, true);
+                reset(i, true, true);
                 mPayload[i].limitrequested = true;
             }
             mSerialDebug  = false;
@@ -84,7 +85,7 @@ class MiPayload {
                     if (!mPayload[iv->id].complete)
                         process(false); // no retransmit
 
-                    if (!mPayload[iv->id].complete) {
+                    if (!mPayload[iv->id].complete && mPayload[iv->id].rxTmo) {
                         if (mSerialDebug)
                             DPRINT_IVID(DBG_INFO, iv->id);
                         if (!mPayload[iv->id].gotFragment) {
@@ -101,12 +102,14 @@ class MiPayload {
                             }
                         }
                         mPayload[iv->id].complete = true;
+                        mPayload[iv->id].rxTmo    = true;
                         iv->setQueuedCmdFinished(); // command failed
                     }
                 }
             }
 
-            reset(iv->id);
+            reset(iv->id); // iv->isAvailable() might be added...
+
             mPayload[iv->id].requested = true;
 
             yield();
@@ -310,7 +313,9 @@ class MiPayload {
                     (mPayload[iv->id].txId != 0 &&
                     mPayload[iv->id].txCmd != 0x0f)) {
                     // no processing needed if txId is not one of 0x95, 0x88, 0x89, 0x91, 0x92 or response to 0x36ff
+                    // might need review for limiting and on/off commands!
                     mPayload[iv->id].complete = true;
+                    mPayload[iv->id].rxTmo = true;
                     continue; // skip to next inverter
                 }
 
@@ -332,10 +337,15 @@ class MiPayload {
                                 uint8_t cmd = mPayload[iv->id].txCmd;
                                 if (mPayload[iv->id].retransmits < mMaxRetrans) {
                                     mPayload[iv->id].retransmits++;
-                                    if( !mPayload[iv->id].gotFragment ) {
+                                    if( !mPayload[iv->id].gotFragment && mPayload[iv->id].rxTmo ) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
                                         mPayload[iv->id].retransmits = mMaxRetrans;
+                                    } else if( !mPayload[iv->id].gotFragment && !mPayload[iv->id].rxTmo ) {
+                                        DPRINT_IVID(DBG_INFO, iv->id);
+                                        DBGPRINTLN(F("retransmit on failed first request"));
+                                        mPayload[iv->id].rxTmo = true;
+                                        mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd, true, false);
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
                                         mRadio->sendCmdPacket(iv->radioId.u64, 0x0f, 0x00, true, false);
@@ -382,7 +392,7 @@ class MiPayload {
                                 }
                             }
                         }
-                    } else if(!gotAllMsgParts && pyldComplete) { // crc error on complete Payload
+                    } else if(!gotAllMsgParts && pyldComplete) { // we could not collect all msg parts (?)
                         if (mPayload[iv->id].retransmits < mMaxRetrans) {
                             mPayload[iv->id].retransmits++;
                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
@@ -399,13 +409,14 @@ class MiPayload {
                     } else {
                         if (fastNext) {
                             uint8_t cmd = iv->getQueuedCmd();
-                            if (mSerialDebug) {
+                            /*if (mSerialDebug) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINT(F("fast mode "));
                                 DBGPRINT(F("prepareDevInformCmd 0x"));
                                 DBGHEXLN(cmd);
-                            }
+                            }*/
                             mStat->rxSuccess++;
+                            mPayload[iv->id].rxTmo = false;
                             mRadio->prepareDevInformCmd(iv->radioId.u64, cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
                             mPayload[iv->id].txCmd = cmd;
                         }
@@ -729,7 +740,7 @@ const byteAssign_t InfoAssignment[] = {
             }
         }
 
-        void reset(uint8_t id, bool clrSts = false) {
+        void reset(uint8_t id, bool clrRxTmo = false, bool clrSts = false) {
             memset(mPayload[id].len, 0, MAX_PAYLOAD_ENTRIES);
             mPayload[id].gotFragment = false;
             mPayload[id].rtrRes      = 0;
@@ -747,6 +758,8 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].requested   = false;
             mPayload[id].ts          = *mTimestamp;
             mPayload[id].sts[0]      = 0;
+            if (clrRxTmo)
+                mPayload[id].rxTmo       = true; // design: don't start with complete retransmit
             if (clrSts) {                    // only clear channel states at startup
                 mPayload[id].sts[CH1]    = 0;
                 mPayload[id].sts[CH2]    = 0;

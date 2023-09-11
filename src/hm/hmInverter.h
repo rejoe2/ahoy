@@ -150,6 +150,7 @@ class Inverter {
         bool          isConnected;       // shows if inverter was successfully identified (fw version and hardware info)
         InverterStatus status;           // indicates the current inverter status
         std::array<alarm_t, 10> lastAlarm; // holds last 10 alarms
+        uint8_t       alarmDataReqPending; // alarmData request issued and wait for answer
         uint8_t       alarmNxtWrPos;     // indicates the position in array (rolling buffer)
         uint16_t      alarmCnt;          // counts the total number of occurred alarms
         int8_t        rssi;              // HMS and HMT inverters only
@@ -208,6 +209,8 @@ class Inverter {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // firmware version
                     else if (getHwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
+                    else if (alarmDataReqPending)
+                        enqueCommand<InfoCommand>(AlarmData);          // alarm not answered
                     enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
                 } else if (ivGen == IV_MI){
                     if (getFwVersion() == 0) {
@@ -335,9 +338,10 @@ class Inverter {
                         if (alarmMesIndex < rec->record[pos]) {
                             alarmMesIndex = rec->record[pos];
                             //enqueCommand<InfoCommand>(AlarmUpdate); // What is the function of AlarmUpdate?
-
                             DPRINT(DBG_INFO, "alarm ID incremented to ");
                             DBGPRINTLN(String(alarmMesIndex));
+                            if (alarmDataReqPending < UINT8_MAX)
+                                alarmDataReqPending++;
                             enqueCommand<InfoCommand>(AlarmData);
                         }
                     }
@@ -602,6 +606,8 @@ class Inverter {
 
         uint16_t parseAlarmLog(uint8_t id, uint8_t pyld[], uint8_t len) {
             uint8_t startOff = 2 + id * ALARM_LOG_ENTRY_SIZE;
+            if (alarmDataReqPending)
+                alarmDataReqPending--;
             if((startOff + ALARM_LOG_ENTRY_SIZE) > len)
                 return 0;
 

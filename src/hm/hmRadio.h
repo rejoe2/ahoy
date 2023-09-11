@@ -103,6 +103,7 @@ class HmRadio {
             mNrf24.setDataRate(RF24_250KBPS);
             mNrf24.setAutoAck(true);
             mNrf24.enableDynamicPayloads();
+            mNrf24.enableDynamicAck();
             mNrf24.setCRCLength(RF24_CRC_16);
             mNrf24.setAddressWidth(5);
             mNrf24.openReadingPipe(1, reinterpret_cast<uint8_t*>(&DTU_RADIO_ID));
@@ -129,6 +130,13 @@ class HmRadio {
             mIrqRcvd = false;
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready);  // resets the IRQ pin to HIGH
+            if(mSerialDebug) { //for testing only!
+                DPRINT(DBG_INFO, F("loop - tx_ok: "));
+                DBGPRINT(String(tx_ok));
+                DBGPRINT(F("tx_fail: "));
+                DBGPRINTLN(String(tx_fail));
+            }
+
             mNrf24.flush_tx();                              // empty TX FIFO
 
             // start listening
@@ -199,7 +207,13 @@ class HmRadio {
                         cnt++;
                         mTxBuf[9] = 0x5a;
                         mTxBuf[10] = 0x5a;
-                        mTxBuf[11] = data[0]; // power limit
+                        //Testing only! Original NRF24_DTUMIesp.ino code #L612-L613:
+                        //UsrData[0]=0x5A;UsrData[1]=0x5A;UsrData[2]=100;//0x0a;// 10% limit
+                        //UsrData[3]=((Limit*10) >> 8) & 0xFF;   UsrData[4]= (Limit*10)  & 0xFF;   //WR needs 1 dec= zB 100.1 W
+                        mTxBuf[11] = 100; //10% limit, seems to be necessary to send sth. at all, but for MI-1500 this has no effect
+                        //works (if ever!) only for absulute power limits!
+                        mTxBuf[cnt++] = ((data[0] * 10) >> 8) & 0xff; // power limit
+                        mTxBuf[cnt++] = ((data[0] * 10)     ) & 0xff; // power limit
                         break;
                     default:
                         return;
@@ -251,6 +265,12 @@ class HmRadio {
         bool getReceived(void) {
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready); // resets the IRQ pin to HIGH
+            if(mSerialDebug) { //for testing only!
+                DPRINT(DBG_INFO, F("getReceived - tx_ok: "));
+                DBGPRINT(String(tx_ok));
+                DBGPRINT(F("tx_fail: "));
+                DBGPRINTLN(String(tx_fail));
+            }
 
             bool isLastPackage = false;
             while(mNrf24.available()) {

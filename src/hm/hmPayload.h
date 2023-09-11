@@ -26,6 +26,7 @@ typedef struct {
     uint8_t retransmits;
     bool requested;
     bool gotFragment;
+    bool rxTmo;
 } invPayload_t;
 
 
@@ -46,7 +47,7 @@ class HmPayload {
             mMaxRetrans = maxRetransmits;
             mTimestamp  = timestamp;
             for(uint8_t i = 0; i < MAX_NUM_INVERTERS; i++) {
-                reset(i);
+                reset(i, true);
             }
             mSerialDebug  = false;
             mHighPrioIv   = NULL;
@@ -106,7 +107,7 @@ class HmPayload {
                     if (!mPayload[iv->id].complete)
                         process(false); // no retransmit
 
-                    if (!mPayload[iv->id].complete) {
+                    if (!mPayload[iv->id].complete && !mPayload[iv->id].rxTmo) {
                         if (mSerialDebug)
                             DPRINT_IVID(DBG_INFO, iv->id);
                         if (MAX_PAYLOAD_ENTRIES == mPayload[iv->id].maxPackId) {
@@ -126,7 +127,7 @@ class HmPayload {
                 }
             }
 
-            reset(iv->id);
+            reset(iv->id);  // iv->isAvailable() might be added...
             mPayload[iv->id].requested = true;
 
             yield();
@@ -255,9 +256,17 @@ class HmPayload {
                                         DPRINTLN(DBG_INFO, F("(#") + String(iv->id) + F(") prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
                                         mRadio->prepareDevInformCmd(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
                                         */
-                                        DPRINT_IVID(DBG_INFO, iv->id);
-                                        DBGPRINTLN(F("nothing received"));
-                                        mPayload[iv->id].retransmits = mMaxRetrans;
+                                        if (mPayload[iv->id].rxTmo) {
+                                            DPRINT_IVID(DBG_INFO, iv->id);
+                                            DBGPRINTLN(F("nothing received"));
+                                            mPayload[iv->id].retransmits = mMaxRetrans;
+                                        } else {
+                                            DBGPRINTLN(F("nothing received: complete retransmit"));
+                                            mPayload[iv->id].txCmd = iv->getQueuedCmd();
+                                            DPRINT_IVID(DBG_INFO, iv->id);
+                                            DBGPRINTLN(F("prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
+                                            mRadio->prepareDevInformCmd(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
+                                        }
                                     } else {
                                         for (uint8_t i = 0; i < (mPayload[iv->id].maxPackId - 1); i++) {
                                             if (mPayload[iv->id].len[i] == 0) {
@@ -300,6 +309,8 @@ class HmPayload {
                         }
                         record_t<> *rec = iv->getRecordStruct(mPayload[iv->id].txCmd);  // choose the parser
                         mPayload[iv->id].complete = true;
+                        mPayload[iv->id].requested = false;
+                        mPayload[iv->id].rxTmo = false;
 
                         uint8_t payload[150];
                         uint8_t payloadLen = 0;
@@ -364,6 +375,7 @@ class HmPayload {
                                     DBGHEXLN(cmd);
                                 }
                                 mStat->rxSuccess++;
+                                mPayload[iv->id].requested = true;
                                 mRadio->prepareDevInformCmd(iv->radioId.u64, cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
                                 mPayload[iv->id].txCmd = cmd;
                             }
@@ -432,7 +444,7 @@ class HmPayload {
             return true;
         }
 
-        void reset(uint8_t id) {
+        void reset(uint8_t id, bool clrRxTmo = false) {
             //DPRINT_IVID(DBG_INFO, id);
             //DBGPRINTLN(F("resetPayload"));
             memset(mPayload[id].len, 0, MAX_PAYLOAD_ENTRIES);
@@ -444,6 +456,10 @@ class HmPayload {
             mPayload[id].complete    = false;
             mPayload[id].requested   = false;
             mPayload[id].ts          = *mTimestamp;
+            if (clrRxTmo) {                      // only clear at startup
+                mPayload[id].rxTmo       = true; // design: don't start with complete retransmit
+            }
+
         }
 
         IApp *mApp;

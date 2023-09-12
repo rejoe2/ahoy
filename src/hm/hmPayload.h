@@ -256,16 +256,17 @@ class HmPayload {
                                         DPRINTLN(DBG_INFO, F("(#") + String(iv->id) + F(") prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
                                         mRadio->prepareDevInformCmd(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
                                         */
+                                        DPRINT_IVID(DBG_INFO, iv->id);
                                         if (mPayload[iv->id].rxTmo) {
-                                            DPRINT_IVID(DBG_INFO, iv->id);
                                             DBGPRINTLN(F("nothing received"));
                                             mPayload[iv->id].retransmits = mMaxRetrans;
                                         } else {
-                                            DBGPRINTLN(F("nothing received: complete retransmit"));
+                                            DBGPRINTLN(F("nothing received, 2nd try!"));
                                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
                                             DPRINT_IVID(DBG_INFO, iv->id);
                                             DBGPRINTLN(F("prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
                                             mRadio->prepareDevInformCmd(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
+                                            mPayload[iv->id].rxTmo = true;
                                         }
                                     } else {
                                         for (uint8_t i = 0; i < (mPayload[iv->id].maxPackId - 1); i++) {
@@ -276,6 +277,7 @@ class HmPayload {
                                                     DBGPRINT(String(i + 1));
                                                     DBGPRINTLN(F(" missing: Request Retransmit"));
                                                 }
+                                                mPayload[iv->id].rxTmo = false; // might not be necessary
                                                 mRadio->sendCmdPacket(iv->radioId.u64, TX_REQ_INFO, (SINGLE_FRAME + i), true);
                                                 break;  // only request retransmit one frame per loop
                                             }

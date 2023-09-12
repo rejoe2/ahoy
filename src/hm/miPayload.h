@@ -102,7 +102,6 @@ class MiPayload {
                             }
                         }
                         mPayload[iv->id].complete = true;
-                        mPayload[iv->id].rxTmo    = true;
                         iv->setQueuedCmdFinished(); // command failed
                     }
                 }

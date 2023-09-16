@@ -153,6 +153,13 @@ class Inverter {
         uint8_t       alarmNxtWrPos;     // indicates the position in array (rolling buffer)
         uint16_t      alarmCnt;          // counts the total number of occurred alarms
         int8_t        rssi;              // HMS and HMT inverters only
+        int8_t        mTxChanQuality[RF_CHANNELS]; // qualities of send channels
+        uint8_t       mBestTxChanIndex;     // current send chan index
+        uint8_t       mLastBestTxChanIndex; // last send chan index
+        uint8_t       mTestTxChanIndex;     // Index of last test chan (or special value RF_TX_TEST_CHAN for 1st use)
+        uint8_t       mTestPeriodSendCnt;   // increment of current test period
+        uint8_t       mTestPeriodFailCnt;   // no of fails during current test period
+        uint8_t       mSaveOldTestChanQuality;  // original quality of current TestTxChanIndex
 
 
         static uint32_t *timestamp;      // system timestamp
@@ -174,6 +181,9 @@ class Inverter {
             alarmNxtWrPos      = 0;
             alarmCnt           = 0;
             rssi               = -127;
+
+            mBestTxChanIndex   = AHOY_RF24_DEF_TX_CHANNEL ? AHOY_RF24_DEF_TX_CHANNEL - 1 : RF_CHANNELS - 1;
+            mLastBestTxChanIndex = AHOY_RF24_DEF_TX_CHANNEL;
         }
 
         ~Inverter() {
@@ -208,19 +218,18 @@ class Inverter {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // firmware version
                     else if (getHwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
-                    enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
-                } else if (ivGen == IV_MI){
+                    else
+                        enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
+                } else if (ivGen == IV_MI) {
                     if (getFwVersion() == 0) {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version
                     } else {
                         record_t<> *rec = getRecordStruct(InverterDevInform_Simple);
-                        if (getChannelFieldValue(CH0, FLD_PART_NUM, rec) == 0)
+                        if (getChannelFieldValue(CH0, FLD_PART_NUM, rec) == 0) {
                             enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version for missing HW part nr, delivered by frame 1
-                    }
-                    if (type == INV_TYPE_4CH) {
-                        enqueCommand<InfoCommand>(0x36);
-                    } else {
-                        enqueCommand<InfoCommand>(0x09);
+                        } else {
+                            enqueCommand<InfoCommand>( type == INV_TYPE_4CH ? 0x36 : 0x09 );
+                        }
                     }
                 }
 
@@ -425,6 +434,22 @@ class Inverter {
             }
         }
 
+        inv_type_t getType () {
+            if (ivGen == IV_HM) {
+                switch (type) {
+                    case INV_TYPE_1CH:
+                        return INV_TYPE_HMCH1;
+                    case INV_TYPE_2CH:
+                        return INV_TYPE_HMCH2;
+                    case INV_TYPE_4CH:
+                        return INV_TYPE_HMCH4;
+                    default:
+                        return INV_TYPE_DEFAULT;
+                }
+            }
+            return INV_TYPE_DEFAULT;
+        }
+
         bool isAvailable() {
             bool avail = false;
             if((*timestamp - recordMeas.ts) < INVERTER_INACT_THRES_SEC)
@@ -520,10 +545,7 @@ class Inverter {
                             rec->length  = (uint8_t)(HMS1CH_LIST_LEN);
                             rec->assign  = (byteAssign_t *)hms1chAssignment;
                             rec->pyldLen = HMS1CH_PAYLOAD_LEN;
-                        }  /*else if(IV_MI == ivGen) {
-                            rec->length  = (uint8_t)(HM1CH_LIST_LEN);
-                            rec->assign  = (byteAssign_t *)hm1chAssignment;
-                        }*/
+                        }
                         channels = 1;
                     }
                     else if (INV_TYPE_2CH == type) {
@@ -700,6 +722,123 @@ class Inverter {
                 case 9000: return String(F("Microinverter is suspected of being stolen"));
                 default:   return String(F("Unknown"));
             }
+        }
+
+        bool isNewTxChan ()
+        {
+            return mBestTxChanIndex != mLastBestTxChanIndex;
+        }
+
+        uint8_t getNextTxChanIndex (void)
+        {
+            // start with the next index: round robbin in case of same 'best' quality
+            uint8_t curIndex = (mBestTxChanIndex + 1) % RF_CHANNELS;
+
+            mLastBestTxChanIndex = mBestTxChanIndex;
+            mBestTxChanIndex = curIndex;
+            curIndex = (curIndex + 1) % RF_CHANNELS;
+            for (uint16_t i=1; i<RF_CHANNELS; i++) {
+                if (mTxChanQuality[curIndex] > mTxChanQuality[mBestTxChanIndex]) {
+                    mBestTxChanIndex = curIndex;
+                }
+                curIndex = (curIndex + 1) % RF_CHANNELS;
+            }
+            if ((mBestTxChanIndex == mLastBestTxChanIndex) && (mTestPeriodSendCnt >= RF_TEST_PERIOD_MAX_SEND_CNT)) {
+                if (mTestPeriodFailCnt > RF_TEST_PERIOD_MAX_FAIL_CNT) {
+                    // try round robbin another chan and see if it works even better
+                    mTestTxChanIndex = (mTestTxChanIndex + 1) % RF_CHANNELS;
+                    if (mTestTxChanIndex == mBestTxChanIndex) {
+                        mTestTxChanIndex = (mTestTxChanIndex + 1) % RF_CHANNELS;
+                    }
+                    // give it a fair chance but remember old status in case of immediate fail
+                    mSaveOldTestChanQuality = mTxChanQuality[mTestTxChanIndex];
+                    mTxChanQuality[mTestTxChanIndex] = mTxChanQuality[mBestTxChanIndex];
+                    mBestTxChanIndex = mTestTxChanIndex;
+                    mTestTxChanIndex = RF_TX_TEST_CHAN_1ST_USE; // mark the chan as a test and as 1st use during new test period
+                    DPRINTLN (DBG_INFO, "Try Ch Idx " + String (mBestTxChanIndex));
+                }
+                // design: start new test period
+                mTestPeriodSendCnt = 0;
+                mTestPeriodFailCnt = 0;
+            } else if (mBestTxChanIndex != mLastBestTxChanIndex) {
+                mTestPeriodSendCnt = 0;
+                mTestPeriodFailCnt = 0;
+            }
+            return mBestTxChanIndex;
+        }
+
+        void addTxChanQuality (int8_t quality)
+        {
+            quality = mTxChanQuality[mBestTxChanIndex] + quality;
+            if (quality < RF_TX_CHAN_MIN_QUALITY) {
+                quality = RF_TX_CHAN_MIN_QUALITY;
+            } else if (quality > RF_TX_CHAN_MAX_QUALITY) {
+                quality = RF_TX_CHAN_MAX_QUALITY;
+            }
+            mTxChanQuality[mBestTxChanIndex] = quality;
+        }
+
+        void evalTxChanQuality (bool crcPass, uint8_t Retransmits, uint8_t rxFragments,
+            uint8_t lastRxFragments)
+        {
+            if (!Retransmits || isNewTxChan ()) {
+                if (mTestPeriodSendCnt < 0xff) {
+                    mTestPeriodSendCnt++;
+                }
+            }
+            if (lastRxFragments == rxFragments) {
+                // nothing received: send probably lost
+                if (!Retransmits || isNewTxChan()) {
+                    if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
+                        // we want _QUALITY_OK at least: switch back to orig quality
+                        mTxChanQuality[mBestTxChanIndex] = mSaveOldTestChanQuality;
+                    }
+                    addTxChanQuality (RF_TX_CHAN_QUALITY_BAD);
+                    if (mTestPeriodFailCnt < 0xff) {
+                        mTestPeriodFailCnt++;
+                    }
+                } // else: dont overestimate burst distortion
+            } else if (!lastRxFragments && crcPass) {
+                if (!Retransmits || isNewTxChan()) {
+                    // every fragment received successfull immediately
+                    addTxChanQuality (RF_TX_CHAN_QUALITY_GOOD);
+                } else {
+                    // every fragment received successfully
+                    addTxChanQuality (RF_TX_CHAN_QUALITY_OK);
+                }
+            } else if (crcPass) {
+                if (isNewTxChan ()) {
+                    // last Fragment successfully received on new send channel
+                    addTxChanQuality (RF_TX_CHAN_QUALITY_OK);
+                }
+            } else if (!Retransmits || isNewTxChan()) {
+                // no complete receive for this send channel
+                if (rxFragments - lastRxFragments > 2) {
+                    // graceful evaluation for big inverters that have to send 4 answer packets
+                    addTxChanQuality (RF_TX_CHAN_QUALITY_OK);
+                } else if (rxFragments - lastRxFragments < 2) {
+                    if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
+                        // we want _QUALITY_OK at least: switch back to orig quality
+                        mTxChanQuality[mBestTxChanIndex] = mSaveOldTestChanQuality;
+                    }
+                    addTxChanQuality (RF_TX_CHAN_QUALITY_LOW);
+                    if (mTestPeriodFailCnt < 0xff) {
+                        mTestPeriodFailCnt++;
+                    }
+                } // else: _QUALITY_NEUTRAL, keep any test channel
+            } // else: dont overestimate burst distortion
+            if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
+                // special evaluation of test channel only at the beginning of current test period
+                mTestTxChanIndex = mBestTxChanIndex;
+            }
+        }
+
+        void dumpTxChanQuality()
+        {
+            for(uint8_t i = 0; i < RF_CHANNELS; i++) {
+                DBGPRINT(" " + String (mTxChanQuality[i]));
+            }
+            DBGPRINT (", Cnt " + String (mTestPeriodSendCnt) + ", Fail " + String (mTestPeriodFailCnt));
         }
 
     private:

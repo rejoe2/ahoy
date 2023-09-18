@@ -391,6 +391,7 @@ class HmPayload {
                                 }
                             }
                             if (fastNext) {
+                                iv->setQueuedCmdFinished();
                                 uint8_t cmd = iv->getQueuedCmd();
                                 if (mSerialDebug) {
                                     DPRINT_IVID(DBG_INFO, iv->id);
@@ -413,7 +414,8 @@ class HmPayload {
                             mStat->rxFail++;
                         }
 
-                        iv->setQueuedCmdFinished();
+                        if (!fastNext)
+                            iv->setQueuedCmdFinished();
                     }
                 }
                 yield();

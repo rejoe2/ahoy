@@ -445,8 +445,9 @@ class MiPayload {
                         if (!fastNext) {
                             mPayload[iv->id].rxTmo = true;
                         } else {
+                            iv->setQueuedCmdFinished();
                             uint8_t cmd = iv->getQueuedCmd();
-                             if (mSerialDebug) {
+                            if (mSerialDebug) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINT(F("fast mode "));
                                 DBGPRINT(F("prepareDevInformCmd 0x"));

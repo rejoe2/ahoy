@@ -575,6 +575,7 @@ class MiPayload {
                 mPayload[iv->id].dataAB[datachan] = true;
                 if ( p->packet[0] == 0x89 || p->packet[0] == 0x91 ) {
                     if ( mPayload[iv->id].multi_parts == 7 ) {
+  //                    miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
                         miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0);
                         mPayload[iv->id].evaluate_q = false;
                     }
@@ -600,7 +601,6 @@ class MiPayload {
                     mPayload[iv->id].complete = false;
                 } else {
                     miComplete(iv);
-//                    miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
                 }
             }
 
@@ -829,10 +829,12 @@ const byteAssign_t InfoAssignment[] = {
         void miEvalTxChanQuality (Inverter<> *iv, bool gotAll, uint8_t Retransmits, uint8_t rxFragments,
             uint8_t lastRxFragments) {
             iv->evalTxChanQuality( gotAll, Retransmits, rxFragments, lastRxFragments);
-            DPRINT_IVID(DBG_INFO, iv->id);
-            DBGPRINT("Quality: ");
-            iv->dumpTxChanQuality();
-            DBGPRINTLN("");
+            if (mSerialDebug) {
+                DPRINT_IVID(DBG_INFO, iv->id);
+                DBGPRINT("Quality: ");
+                iv->dumpTxChanQuality();
+                DBGPRINTLN("");
+            }
         }
 
 

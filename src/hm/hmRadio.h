@@ -66,22 +66,8 @@ class HmRadio {
                 DBGPRINTLN(F(")"));
             }
 
-            // Depending on the program, the module can work on 2403, 2423, 2440, 2461 or 2475MHz.
-            // Channel List      2403, 2423, 2440, 2461, 2475MHz
-            /*mRfChLst[0] = 03;
-            mRfChLst[1] = 23;
-            mRfChLst[2] = 40;
-            mRfChLst[3] = 61;
-            mRfChLst[4] = 75;
-
-            // default channels
-            mTxChIdx    = 2; // Start TX with 40
-            mRxChIdx    = 0; // Start RX with 03 */
             mTxChIdx    = AHOY_RF24_DEF_TX_CHANNEL;
             mRxChIdx    = AHOY_RF24_DEF_RX_CHANNEL;
-
-            mSendCnt        = 0;
-            mRetransmits    = 0;
 
             mSerialDebug    = false;
             mIrqRcvd        = false;
@@ -169,7 +155,7 @@ class HmRadio {
                 while (micros()-startMicros < mRxChanTmo) {  // listen (4088us or?) 5110us to each channel
                     if (mIrqRcvd) {
                         mIrqRcvd = false;
-                        if (getReceived()) {        // everything received
+                        if (getReceived()) { // everything received
                             return true;
                         }
                     }
@@ -274,10 +260,6 @@ class HmRadio {
         }
 
         std::queue<packet_t> mBufCtrl;
-
-        uint32_t mSendCnt;
-        uint32_t mRetransmits;
-
         bool mSerialDebug;
 
     private:
@@ -385,10 +367,10 @@ class HmRadio {
 
         volatile bool mIrqRcvd;
         uint64_t DTU_RADIO_ID;
-
-        /*uint8_t mRfChLst[RF_CHANNELS];
-        uint8_t mTxChIdx;
-        uint8_t mRxChIdx;*/
+        SPIClass* mSpi;
+        RF24 mNrf24;
+        uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
+        statistics_t *mStat;
         uint8_t mTxChIdx;
         uint8_t mRxChIdx;           // cur index in mRxChannels
         uint8_t *mRxChannels;       // rx channel to be used; depends on inverter and previous tx channel
@@ -397,11 +379,6 @@ class HmRadio {
         uint32_t  mRxChanTmo;         // max wait time in micros for a rx channel
 
         volatile long mRfIrqTime[1 + MAX_PAYLOAD_ENTRIES];
-
-        SPIClass* mSpi;
-        RF24 mNrf24;
-        uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
-        statistics_t *mStat;
 };
 
 #endif /*__RADIO_H__*/

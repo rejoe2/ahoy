@@ -151,8 +151,7 @@ class Inverter {
         std::array<alarm_t, 10> lastAlarm; // holds last 10 alarms
         uint8_t       alarmNxtWrPos;     // indicates the position in array (rolling buffer)
         uint16_t      alarmCnt;          // counts the total number of occurred alarms
-        uint8_t       alarmLastId;       // lastId which was received
-        bool          alarmReqPending;   // alarmData request issued and wait for answer
+        uint16_t      alarmLastId;       // lastId which was received
         int8_t        rssi;              // HMS and HMT inverters only
         int8_t        mTxChanQuality[RF_CHANNELS]; // qualities of send channels
         uint8_t       mBestTxChanIndex;     // current send chan index
@@ -212,16 +211,16 @@ class Inverter {
             }
         }
 
-        uint8_t getQueuedCmd() {
+uint8_t getQueuedCmd() {
             if (_commandQueue.empty()) {
                 if (ivGen != IV_MI) {
                     if (getFwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_All); // firmware version
                     else if (getHwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
-                    else if(alarmReqPending)
+                    else if((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0))
                         enqueCommand<InfoCommand>(AlarmData);  // alarm not answered
-                        enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
+                    enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
                 } else if (ivGen == IV_MI){
                     if (getFwVersion() == 0) {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version
@@ -349,7 +348,6 @@ class Inverter {
 
                             DPRINT(DBG_INFO, "alarm ID incremented to ");
                             DBGPRINTLN(String(alarmMesIndex));
-                            alarmReqPending = true;
                             enqueCommand<InfoCommand>(AlarmData);
                         }
                     }
@@ -646,7 +644,6 @@ class Inverter {
             DPRINTLN(DBG_DEBUG, "Alarm #" + String(pyld[startOff+1]) + " '" + String(getAlarmStr(pyld[startOff+1])) + "' start: " + ah::getTimeStr(start) + ", end: " + ah::getTimeStr(endTime));
             addAlarm(pyld[startOff+1], start, endTime);
 
-            alarmReqPending = false;
             alarmCnt++;
             alarmLastId = alarmMesIndex;
 
@@ -730,13 +727,11 @@ class Inverter {
             }
         }
 
-        bool isNewTxChan ()
-        {
+        bool isNewTxChan () {
             return mBestTxChanIndex != mLastBestTxChanIndex;
         }
 
-        uint8_t getNextTxChanIndex (void)
-        {
+        uint8_t getNextTxChanIndex (void) {
             // start with the next index: round robbin in case of same 'best' quality
             uint8_t curIndex = (mBestTxChanIndex + 1) % RF_CHANNELS;
 
@@ -773,8 +768,7 @@ class Inverter {
             return mBestTxChanIndex;
         }
 
-        void addTxChanQuality (int8_t quality)
-        {
+        void addTxChanQuality (int8_t quality) {
             quality = mTxChanQuality[mBestTxChanIndex] + quality;
             if (quality < RF_TX_CHAN_MIN_QUALITY) {
                 quality = RF_TX_CHAN_MIN_QUALITY;
@@ -784,9 +778,7 @@ class Inverter {
             mTxChanQuality[mBestTxChanIndex] = quality;
         }
 
-        void evalTxChanQuality (bool crcPass, uint8_t Retransmits, uint8_t rxFragments,
-            uint8_t lastRxFragments)
-        {
+        void evalTxChanQuality (bool crcPass, uint8_t Retransmits, uint8_t rxFragments, uint8_t lastRxFragments) {
             if (!Retransmits || isNewTxChan ()) {
                 if (mTestPeriodSendCnt < 0xff) {
                     mTestPeriodSendCnt++;
@@ -839,8 +831,7 @@ class Inverter {
             }
         }
 
-        void dumpTxChanQuality()
-        {
+        void dumpTxChanQuality() {
             for(uint8_t i = 0; i < RF_CHANNELS; i++) {
                 DBGPRINT(" " + String (mTxChanQuality[i]));
             }

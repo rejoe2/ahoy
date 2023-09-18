@@ -129,7 +129,7 @@ class HmPayload {
             }
 
             //bool save_rxTmo = mPayload[iv->id].rxTmo;
-            reset(iv->id, iv->isConnected);
+            reset(iv->id, !iv->isConnected);
             //mPayload[iv->id].rxTmo = save_rxTmo;
             mPayload[iv->id].requested = true;
 

@@ -113,7 +113,7 @@ class MiPayload {
                 }
             }
 
-            reset(iv->id, iv->isConnected);
+            reset(iv->id, !iv->isConnected);
             mPayload[iv->id].requested = true;
 
             yield();

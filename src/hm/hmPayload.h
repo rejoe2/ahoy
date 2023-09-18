@@ -128,9 +128,9 @@ class HmPayload {
                 }
             }
 
-            bool save_rxTmo = mPayload[iv->id].rxTmo;
-            reset(iv->id);
-            mPayload[iv->id].rxTmo = save_rxTmo;
+            //bool save_rxTmo = mPayload[iv->id].rxTmo;
+            reset(iv->id, iv->isConnected);
+            //mPayload[iv->id].rxTmo = save_rxTmo;
             mPayload[iv->id].requested = true;
 
             yield();
@@ -470,7 +470,7 @@ class HmPayload {
             return true;
         }
 
-        void reset(uint8_t id) {
+        void reset(uint8_t id, bool setTxTmo = true) {
             //DPRINT_IVID(DBG_INFO, id);
             //DBGPRINTLN(F("resetPayload"));
             memset(mPayload[id].len, 0, MAX_PAYLOAD_ENTRIES);
@@ -482,7 +482,7 @@ class HmPayload {
             mPayload[id].complete    = false;
             mPayload[id].requested   = false;
             mPayload[id].ts          = *mTimestamp;
-            mPayload[id].rxTmo       = true; // design: don't start with complete retransmit
+            mPayload[id].rxTmo       = setTxTmo; // design: don't start with complete retransmit
             mPayload[id].lastFragments = 0;  // for send channel quality measurement
         }
 

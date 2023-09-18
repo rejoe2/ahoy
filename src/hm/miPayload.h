@@ -53,7 +53,7 @@ class MiPayload {
             mMaxRetrans = maxRetransmits;
             mTimestamp  = timestamp;
             for(uint8_t i = 0; i < MAX_NUM_INVERTERS; i++) {
-                reset(i, true);
+                reset(i, false, true);
                 mPayload[i].limitrequested = true;
             }
             mSerialDebug  = false;
@@ -113,7 +113,7 @@ class MiPayload {
                 }
             }
 
-            reset(iv->id);
+            reset(iv->id, iv->isConnected);
             mPayload[iv->id].requested = true;
 
             yield();
@@ -795,11 +795,11 @@ const byteAssign_t InfoAssignment[] = {
             }
         }
 
-        void reset(uint8_t id, bool clrSts = false) {
+        void reset(uint8_t id, bool setTxTmo = true, bool clrSts = false) {
             memset(mPayload[id].len, 0, MAX_PAYLOAD_ENTRIES);
             mPayload[id].gotFragment = false;
             mPayload[id].fragments = 0;
-            mPayload[id].rxTmo     = false;// design: don't start with complete retransmit
+            mPayload[id].rxTmo     = setTxTmo;// design: don't start with complete retransmit
             mPayload[id].lastFragments = 0;  // for send channel quality measurement
             mPayload[id].retransmits = 0;
             mPayload[id].rtrRes      = 0;

@@ -314,6 +314,7 @@ const devInfo_t devInfo[] = {
     { 0x101010,  300 },
     { 0x101020,  350 },
     { 0x101030,  400 },
+    { 0x101040,  400 }, // https://github.com/lumapu/ahoy/issues/1111#issuecomment-1726515824
     { 0x101110,  600 }, // [TSOL800(DE) ..20, HWv=2.66], [HM-600 ..20, HWv=2.66]
     { 0x101120,  700 },
     { 0x101130,  800 },
@@ -344,11 +345,9 @@ const devInfo_t devInfo[] = {
 };
 
 #define RF_CHANNELS         5
-//originally in hmDefines.h by oberfritze
 #define AHOY_RF24_DEF_TX_CHANNEL 2 // 40
 #define AHOY_RF24_DEF_RX_CHANNEL 0 // 3
 
-//originally in hmInverter.h by oberfritze
 // Send channel heuristic has 2 strategies:
 // - Evaluation of current send channel quality due to receive situation and compare with others
 #define RF_TX_CHAN_MAX_QUALITY        4

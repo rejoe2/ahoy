@@ -128,9 +128,7 @@ class HmPayload {
                 }
             }
 
-            //bool save_rxTmo = mPayload[iv->id].rxTmo;
             reset(iv->id, !iv->isConnected);
-            //mPayload[iv->id].rxTmo = save_rxTmo;
             mPayload[iv->id].requested = true;
 
             yield();
@@ -325,8 +323,8 @@ class HmPayload {
                         if (mSerialDebug) {
                             DPRINT_IVID(DBG_INFO, iv->id);
                             DBGPRINT(F("procPyld: cmd:  0x"));
-                            DBGHEXLN(mPayload[iv->id].txCmd);
-                            DPRINT(DBG_INFO, F("procPyld: txid: 0x"));
+                            DHEX(mPayload[iv->id].txCmd);
+                            DBGPRINT(F("; procPyld: txid: 0x"));
 	                        DBGHEXLN(mPayload[iv->id].txId);
                             DPRINT(DBG_DEBUG, F("procPyld: max:  "));
                             DPRINTLN(DBG_DEBUG, String(mPayload[iv->id].maxPackId));
@@ -463,7 +461,7 @@ class HmPayload {
                 return false;
 
             //requests to cause the next request to be executed immediately
-            if ( mPayload[iv->id].txCmd < 11 || mPayload[iv->id].txCmd > 18 ) {
+            if ( mPayload[iv->id].gotFragment && ( mPayload[iv->id].txCmd < 11 || mPayload[iv->id].txCmd > 18 ) ) {
                 *fastNext = true;
             }
 

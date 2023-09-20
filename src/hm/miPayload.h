@@ -132,8 +132,7 @@ class MiPayload {
                     DBGPRINTLN(String(iv->powerLimit[0]));
                 }
                 iv->powerLimitAck = false;
-                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(),
-                    iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, false, false);
+                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, false, false, iv->type == INV_TYPE_4CH);
                 mPayload[iv->id].txCmd = iv->devControlCmd;
                 mPayload[iv->id].limitrequested = true;
 
@@ -669,7 +668,7 @@ class MiPayload {
             }
 
             //check if we want the next request to be executed faster
-            if (txCmd == 0x0f)
+            if (mPayload[iv->id].gotFragment && txCmd == 0x0f)
                 *fastNext = true;
             return true;
         }

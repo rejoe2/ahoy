@@ -444,7 +444,7 @@ class MiPayload {
                         if (!fastNext) {
                             mPayload[iv->id].rxTmo = true;
                         } else {
-                            iv->setQueuedCmdFinished();
+                            /*iv->setQueuedCmdFinished();
                             uint8_t cmd = iv->getQueuedCmd();
                             if (mSerialDebug) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
@@ -456,7 +456,9 @@ class MiPayload {
                             //mRadio->prepareDevInformCmd(iv->radioId.u64, cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
                             mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(),
                                 iv->getNextTxChanIndex(), cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
-                            mPayload[iv->id].txCmd = cmd;
+                            mPayload[iv->id].txCmd = cmd; */
+                            if (mHighPrioIv == NULL)
+                                mHighPrioIv = iv;
                         }
                     }
                 } else {

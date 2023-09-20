@@ -152,6 +152,7 @@ class Inverter {
         uint8_t       alarmNxtWrPos;     // indicates the position in array (rolling buffer)
         uint16_t      alarmCnt;          // counts the total number of occurred alarms
         uint16_t      alarmLastId;       // lastId which was received
+        uint8_t       alarmDataReqPending; // alarmData request issued and wait for answer
         int8_t        rssi;              // HMS and HMT inverters only
         int8_t        mTxChanQuality[RF_CHANNELS]; // qualities of send channels
         uint8_t       mBestTxChanIndex;     // current send chan index
@@ -181,6 +182,7 @@ class Inverter {
             alarmNxtWrPos      = 0;
             alarmCnt           = 0;
             alarmLastId        = 0;
+            alarmDataReqPending = 0;
             rssi               = -127;
             mBestTxChanIndex   = AHOY_RF24_DEF_TX_CHANNEL ? AHOY_RF24_DEF_TX_CHANNEL - 1 : RF_CHANNELS - 1;
             mLastBestTxChanIndex = AHOY_RF24_DEF_TX_CHANNEL;
@@ -218,7 +220,7 @@ uint8_t getQueuedCmd() {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // firmware version
                     else if (getHwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
-                    else if((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0))
+                    else if(alarmDataReqPending)
                         enqueCommand<InfoCommand>(AlarmData);  // alarm not answered
                     enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
                 } else if (ivGen == IV_MI){
@@ -349,6 +351,8 @@ uint8_t getQueuedCmd() {
                             DPRINT(DBG_INFO, "alarm ID incremented to ");
                             DBGPRINTLN(String(alarmMesIndex));
                             enqueCommand<InfoCommand>(AlarmData);
+                            if (alarmDataReqPending < UINT8_MAX)
+                                alarmDataReqPending++;
                         }
                     }
                 }
@@ -626,6 +630,8 @@ uint8_t getQueuedCmd() {
 
         uint16_t parseAlarmLog(uint8_t id, uint8_t pyld[], uint8_t len) {
             uint8_t startOff = 2 + id * ALARM_LOG_ENTRY_SIZE;
+            if (alarmDataReqPending)
+                alarmDataReqPending--;
             if((startOff + ALARM_LOG_ENTRY_SIZE) > len)
                 return 0;
 

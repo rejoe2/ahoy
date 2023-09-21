@@ -21,6 +21,9 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
+// #define AHOY_RADIO_TX_PENDING_LOOP
+#define RX_WAIT_SAFETY_MRGN 10
+
 const char* const rf24AmpPowerNames[] = {"MIN", "LOW", "HIGH", "MAX"};
 
 
@@ -123,8 +126,18 @@ class HmRadio {
         }
 
         bool loop(void) {
+#ifdef AHOY_RADIO_TX_PENDING_LOOP
+            if (!mTxPending) {
+                return false;
+            }
+            mTxPending = false;
+            while (!mIrqRcvd) {
+                yield();
+            }
+#else
             if (!mIrqRcvd)
                 return false; // nothing to do
+#endif
             mIrqRcvd = false;
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready);  // resets the IRQ pin to HIGH
@@ -363,7 +376,9 @@ class HmRadio {
             mNrf24.setChannel(mRfChLst[mTxChIdx]);
             mNrf24.openWritingPipe(reinterpret_cast<uint8_t*>(&invId));
             mNrf24.startWrite(mTxBuf, len, false); // false = request ACK response
-
+#ifdef AHOY_RADIO_TX_PENDING_LOOP
+            mTxPending = true;
+#endif
             if(isRetransmit)
                 mStat->retransmits++;
             else
@@ -381,6 +396,10 @@ class HmRadio {
         RF24 mNrf24;
         uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
         statistics_t *mStat;
+
+#ifdef AHOY_RADIO_TX_PENDING_LOOP
+        bool mTxPending;            // send has been started: wait in loop to setup receive without break
+#endif
 };
 
 #endif /*__RADIO_H__*/

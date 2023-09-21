@@ -27,8 +27,12 @@ typedef struct {
     uint8_t retransmits;
     bool gotFragment;
     uint8_t rtrRes; // for limiting resets
-    uint8_t multi_parts;  // for quality
+    uint8_t multi_parts;
     bool rxTmo;
+    uint8_t req_rtrnsmts; // for quality
+    bool evaluate_q;     // for quality
+    uint8_t fragments;
+    uint8_t lastFragments;
 } miPayload_t;
 
 
@@ -127,7 +131,7 @@ class MiPayload {
                     DBGPRINTLN(String(iv->powerLimit[0]));
                 }
                 iv->powerLimitAck = false;
-                mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, false, false, iv->type == INV_TYPE_4CH);
+                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, false, false, iv->type == INV_TYPE_4CH);
                 mPayload[iv->id].txCmd = iv->devControlCmd;
                 mPayload[iv->id].limitrequested = true;
 
@@ -153,7 +157,7 @@ class MiPayload {
                     DBGPRINT(F("prepareDevInformCmd 0x"));
                     DBGHEXLN(cmd);
                 }
-                mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd2, false, false);
+                mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd2, false, false);
 
                 mPayload[iv->id].txCmd = cmd;
                 if (iv->type == INV_TYPE_1CH || iv->type == INV_TYPE_2CH) {
@@ -319,6 +323,29 @@ class MiPayload {
                 if (!mPayload[iv->id].complete) {
                     bool gotAllMsgParts, pyldComplete, fastNext;
                     gotAllMsgParts = build(iv, &pyldComplete, &fastNext);
+
+                    // evaluate quality of send channel with rcv params
+                    if ( (retransmit) && (mPayload[iv->id].requested)
+                          && (mPayload[iv->id].retransmits < mMaxRetrans)
+                          && !gotAllMsgParts ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
+
+                        //iv->evalTxChanQuality (gotAllMsgParts, mPayload[iv->id].retransmits,
+                        bool allParts;
+                        uint8_t qFrag = mPayload[iv->id].fragments;
+                        if (iv->type == INV_TYPE_4CH) {
+                            allParts = !mPayload[iv->id].retransmits ? true : false;
+                        } else {
+                            allParts = mPayload[id].multi_parts == 7 ? true : false;
+                            if (!allParts) {
+                                qFrag = mPayload[iv->id].req_rtrnsmts;
+                            }
+                        }
+                        if (mPayload[iv->id].evaluate_q)
+                            miEvalTxChanQuality (iv, allParts, mPayload[iv->id].req_rtrnsmts,
+                                qFrag, mPayload[iv->id].lastFragments);
+                    }
+
+                    mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
                     if (!gotAllMsgParts && !pyldComplete) { // payload not complete
                         if ((mPayload[iv->id].requested) && (retransmit)) {
                             if (iv->devControlCmd == Restart || iv->devControlCmd == CleanState_LockAndAlarm) {
@@ -330,11 +357,12 @@ class MiPayload {
                             } else if(iv->devControlCmd == ActivePowerContr) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINTLN(F("retransmit power limit"));
-                                mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, true, false);
+                                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, true, false);
                             } else {
                                 uint8_t cmd = mPayload[iv->id].txCmd;
                                 if (mPayload[iv->id].retransmits < mMaxRetrans) {
                                     mPayload[iv->id].retransmits++;
+                                    mPayload[iv->id].req_rtrnsmts++;
                                     if( !mPayload[iv->id].gotFragment && mPayload[iv->id].rxTmo ) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
@@ -343,10 +371,10 @@ class MiPayload {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("retransmit on failed first request"));
                                         mPayload[iv->id].rxTmo = true;
-                                        mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd, true, false);
+                                        mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd, true, false);
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
-                                        mRadio->sendCmdPacket(iv->radioId.u64, 0x0f, 0x00, true, false);
+                                        mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), 0x0f, 0x00, true, false);
                                         mPayload[id].multi_parts = 0;
                                     } else {
                                         bool change = false;
@@ -376,6 +404,7 @@ class MiPayload {
                                         if (change) {
                                             DBGPRINT(F("next request is"));
                                             mPayload[iv->id].txCmd = cmd;
+                                            mPayload[iv->id].req_rtrnsmts = 0;
                                             mPayload[iv->id].rtrRes++;
                                         } else {
                                             DBGPRINT(F("sth."));
@@ -384,7 +413,7 @@ class MiPayload {
                                         DBGPRINT(F(" 0x"));
                                         DBGHEXLN(cmd);
                                         mPayload[id].multi_parts = 0;
-                                        mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd, true, false);
+                                        mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, cmd, true, false);
                                         yield();
                                     }
                                 } else {
@@ -395,6 +424,7 @@ class MiPayload {
                     } else if(!gotAllMsgParts && pyldComplete) { // crc error on complete Payload
                         if (mPayload[iv->id].retransmits < mMaxRetrans) {
                             mPayload[iv->id].retransmits++;
+                            mPayload[iv->id].req_rtrnsmts++;
                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
                             mPayload[id].multi_parts  = 0;
                             if (mSerialDebug) {
@@ -404,7 +434,7 @@ class MiPayload {
                                 DBGPRINT(F("prepareDevInformCmd 0x"));
                                 DBGHEXLN(mPayload[iv->id].txCmd);
                             }
-                            mRadio->sendCmdPacket(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
+                            mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
                         } else {
                             mPayload[iv->id].rxTmo = true;
                         }
@@ -446,6 +476,8 @@ class MiPayload {
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);  // choose the record structure
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
+            mPayload[iv->id].evaluate_q = true;
             mPayload[iv->id].multi_parts += 3;
             mPayload[iv->id].txId = p->packet[0];
             miStsConsolidate(iv, stschan, rec, p->packet[10], p->packet[12], p->packet[9], p->packet[11]);
@@ -508,25 +540,14 @@ class MiPayload {
                 }
                 iv->lastAlarm[0] = alarm_t(prntsts, mPayload[iv->id].ts, mPayload[iv->id].ts);
             }
-            /*if(AlarmData == mPayload[iv->id].txCmd) {
-                                uint8_t i = 0;
-                                uint16_t code;
-                                uint32_t start, end;
-                                while(1) {
-                                    code = iv->parseAlarmLog(i++, payload, payloadLen, &start, &end);
-                                    if(0 == code)
-                                        break;
-                                    if (NULL != mCbAlarm)
-                                        (mCbAlarm)(code, start, end);
-                                    yield();
-                                }
-                            }*/
+
         }
 
         void miDataDecode(Inverter<> *iv, packet_t *p) {
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);  // choose the parser
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
             mPayload[iv->id].multi_parts += 4;
 
             uint8_t datachan = ( p->packet[0] == 0x89 || p->packet[0] == (0x36 + ALL_FRAMES) ) ? CH1 :
@@ -550,6 +571,13 @@ class MiPayload {
 
             if ( datachan < 3 ) {
                 mPayload[iv->id].dataAB[datachan] = true;
+                if ( p->packet[0] == 0x89 || p->packet[0] == 0x91 ) {
+                    if ( mPayload[iv->id].multi_parts == 7 ) {
+  //                    miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
+                        miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0);
+                        mPayload[iv->id].evaluate_q = false;
+                    }
+                }
             }
             if ( !mPayload[iv->id].dataAB[CH0] && mPayload[iv->id].dataAB[CH1] && mPayload[iv->id].dataAB[CH2] ) {
                 mPayload[iv->id].dataAB[CH0] = true;
@@ -563,6 +591,7 @@ class MiPayload {
                   FCODE = (uint8_t)(p->packet[27]);
                 }*/
                 miStsConsolidate(iv, datachan, rec, p->packet[23], p->packet[24]);
+                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
 
                 if (p->packet[0] < (0x39 + ALL_FRAMES) ) {
                     mPayload[iv->id].txCmd++;
@@ -619,6 +648,7 @@ class MiPayload {
                 if ((txCmd == 0x09) || (txCmd == 0x11)) {
                     if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0]) {
                       miComplete(iv);
+                      mPayload[iv->id].evaluate_q = true;
                       return true;
                     }
                     return false;
@@ -645,6 +675,7 @@ class MiPayload {
             record_t<> *rec = iv->getRecordStruct(InverterDevInform_All);  // choose the record structure
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
 
 /*
 Polling the device software and hardware version number command
@@ -757,6 +788,7 @@ const byteAssign_t InfoAssignment[] = {
                 mPayload[iv->id].rxTmo    = true;
                 mPayload[iv->id].requested= false;
                 mStat->rxSuccess++;
+                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
             }
         }
 
@@ -765,6 +797,10 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].gotFragment = false;
             mPayload[id].rxTmo       = setTxTmo;// design: don't start with complete retransmit
             mPayload[id].rtrRes      = 0;
+            mPayload[id].evaluate_q  = true;
+            mPayload[id].fragments   = 0;
+            mPayload[id].lastFragments = 0;  // for send channel quality measurement
+            mPayload[id].req_rtrnsmts = 0;
             mPayload[id].multi_parts = 0;
             mPayload[id].retransmits = 0;
             mPayload[id].complete    = false;
@@ -786,6 +822,19 @@ const byteAssign_t InfoAssignment[] = {
                 mPayload[id].sts[5]      = 0; //remember last summarized state
             }
         }
+
+
+        void miEvalTxChanQuality (Inverter<> *iv, bool gotAll, uint8_t Retransmits, uint8_t rxFragments,
+            uint8_t lastRxFragments) {
+            iv->evalTxChanQuality( gotAll, Retransmits, rxFragments, lastRxFragments);
+            if (mSerialDebug) {
+                DPRINT_IVID(DBG_INFO, iv->id);
+                DBGPRINT("Quality: ");
+                iv->dumpTxChanQuality();
+                DBGPRINTLN("");
+            }
+        }
+
 
         IApp *mApp;
         HMSYSTEM *mSys;

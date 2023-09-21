@@ -183,7 +183,7 @@ class HmRadio {
             mSerialDebug = true;
         }
 
-        void sendControlPacket(uint64_t invId, inv_type_t invType, uint8_t txChan, uint8_t cmd, uint16_t *data, bool isRetransmit, bool isNoMI = true, bool is4chMI = false) {
+        void sendControlPacket(uint64_t invId, inv_type_t invType, uint8_t txChan, uint8_t cmd, uint16_t *data, bool isRetransmit, bool isNoMI = true, uint16_t powerMax = 0) {
             DPRINT(DBG_INFO, F("sendControlPacket cmd: 0x"));
             DBGHEXLN(cmd);
             prepareReceive (invType, txChan, 1);
@@ -201,29 +201,43 @@ class HmRadio {
             } else { //MI 2nd gen. specific
                 switch (cmd) {
                     case TurnOn:
-                        //mTxBuf[0] = 0x50;
                         mTxBuf[9] = 0x55;
                         mTxBuf[10] = 0xaa;
                         break;
+                    case Restart:
                     case TurnOff:
                         mTxBuf[9] = 0xaa;
                         mTxBuf[10] = 0x55;
                         break;
                     case ActivePowerContr:
-                        mTxBuf[9] = 0x5a;
-                        mTxBuf[10] = 0x5a;
-                        //Testing only! Original NRF24_DTUMIesp.ino code #L612-L613:
-                        //UsrData[0]=0x5A;UsrData[1]=0x5A;UsrData[2]=100;//0x0a;// 10% limit
-                        //UsrData[3]=((Limit*10) >> 8) & 0xFF;   UsrData[4]= (Limit*10)  & 0xFF;   //WR needs 1 dec= zB 100.1 W
-                        if (is4chMI) {
-                            mTxBuf[cnt++] = 100; //10% limit, seems to be necessary to send sth. at all, but for MI-1500 this has no effect
-                            //works (if ever!) only for absulute power limits!
-                            mTxBuf[cnt++] = ((data[0] * 10) >> 8) & 0xff; // power limit
-                            mTxBuf[cnt++] = ((data[0] * 10)     ) & 0xff; // power limit
-                        } else {
-                            mTxBuf[cnt++] = data[0]*10; // power limit
+                        if (data[0]) { // non persistent power limit in %
+                            mTxBuf[9] = 0x5a;
+                            mTxBuf[10] = 0x5a;
+                            //Testing only! Original NRF24_DTUMIesp.ino code #L612-L613:
+                            //UsrData[0]=0x5A;UsrData[1]=0x5A;UsrData[2]=100;//0x0a;// 10% limit
+                            //UsrData[3]=((Limit*10) >> 8) & 0xFF;   UsrData[4]= (Limit*10)  & 0xFF;   //WR needs 1 dec= zB 100.1 W
+                            if (powerMax) {   // we seem to need
+                                mTxBuf[++cnt] = 100; //10% limit, seems to be necessary to send sth. at all, but for MI-1500 this has no effect
+                                //works (if ever!) only for absulute power limits!
+                                mTxBuf[++cnt] = ((data[0] * 10 * powerMax) >> 8) & 0xff; // power limit
+                                mTxBuf[++cnt] = ((data[0] * 10 * powerMax)     ) & 0xff; // power limit
+                            } else {
+                                mTxBuf[++cnt] = data[0]; // simple power limit in %, might be necessary to multiply by 10?
+                            }
+                        } else {       // persistent power limit needs to be translated in DRED command (?)
+                            /* DRED instruction
+                            Order	 Function
+                            0x55AA	 Boot without DRM restrictions
+                            0xA5A5	 DRM0 shutdown
+                            0x5A5A	 DRM5 power limit 0%
+                            0xAA55	 DRM6 power limit 50%
+                            0x5A55	 DRM8 unlimited power operation
+                            */
+                            mTxBuf[0] = 0x50;
+                            //first test...
+                            mTxBuf[9] = 0x5a;
+                            mTxBuf[10] = 0x55;
                         }
-
 
                         break;
                     default:

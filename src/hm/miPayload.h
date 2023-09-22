@@ -491,7 +491,7 @@ class MiPayload {
                 if (iv->type != INV_TYPE_1CH && ( statusMi != 3
                                                 || mPayload[iv->id].sts[stschan] && statusMi == 3 && mPayload[iv->id].sts[stschan] != 3)
                    ) {
-                    iv->lastAlarm[stschan] = alarm_t(prntsts, mPayload[iv->id].ts,mPayload[iv->id].ts);
+                    iv->lastAlarm[stschan] = alarm_t(prntsts, mPayload[iv->id].ts,0);
                     iv->alarmCnt = iv->type == INV_TYPE_2CH ? 3 : 5;
                     iv->alarmLastId = iv->alarmMesIndex;
                 }
@@ -508,6 +508,7 @@ class MiPayload {
             if ( !mPayload[iv->id].sts[0] || prntsts < mPayload[iv->id].sts[0] ) {
                 mPayload[iv->id].sts[0] = prntsts;
                 iv->setValue(iv->getPosByChFld(0, FLD_EVT, rec), rec, prntsts);
+                iv->lastAlarm[0] = alarm_t(prntsts, mPayload[iv->id].ts, 0);
             }
 
             if (iv->alarmMesIndex < rec->record[iv->getPosByChFld(0, FLD_EVT, rec)]) {
@@ -517,21 +518,7 @@ class MiPayload {
                     DBGPRINT(F("alarm ID incremented to "));
                     DBGPRINTLN(String(iv->alarmMesIndex));
                 }
-                iv->lastAlarm[0] = alarm_t(prntsts, mPayload[iv->id].ts, mPayload[iv->id].ts);
             }
-            /*if(AlarmData == mPayload[iv->id].txCmd) {
-                                uint8_t i = 0;
-                                uint16_t code;
-                                uint32_t start, end;
-                                while(1) {
-                                    code = iv->parseAlarmLog(i++, payload, payloadLen, &start, &end);
-                                    if(0 == code)
-                                        break;
-                                    if (NULL != mCbAlarm)
-                                        (mCbAlarm)(code, start, end);
-                                    yield();
-                                }
-                            }*/
         }
 
         void miDataDecode(Inverter<> *iv, packet_t *p) {

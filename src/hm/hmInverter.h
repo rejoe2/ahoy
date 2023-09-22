@@ -152,7 +152,7 @@ class Inverter {
         uint8_t       alarmNxtWrPos;     // indicates the position in array (rolling buffer)
         uint16_t      alarmCnt;          // counts the total number of occurred alarms
         uint16_t      alarmLastId;       // lastId which was received
-        int8_t        rssi;              // HMS and HMT inverters only
+        int8_t        rssi;              // accurate for HMS and HMT inverters only
         uint16_t      mIvRxCnt;          // last iv rx frames (from GetLossRate)
         uint16_t      mIvTxCnt;          // last iv tx frames (from GetLossRate)
         uint16_t      mDtuRxCnt;         // cur dtu rx frames (since last GetLossRate)

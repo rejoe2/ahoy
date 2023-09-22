@@ -21,7 +21,7 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
-// #define AHOY_RADIO_TX_PENDING_LOOP
+#define AHOY_RADIO_TX_PENDING_LOOP
 #define RX_WAIT_SAFETY_MRGN 10
 
 const char* const rf24AmpPowerNames[] = {"MIN", "LOW", "HIGH", "MAX"};
@@ -141,7 +141,10 @@ class HmRadio {
             mIrqRcvd = false;
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready);  // resets the IRQ pin to HIGH
-            mNrf24.flush_tx();                              // empty TX FIFO
+            mNrf24.flush_tx();                              // empty TX FIFO,
+            /*if (tx_ok) { // count acks per inverter...
+
+            }*/
 
             // start listening
             mNrf24.setChannel(mRfChLst[mRxChIdx]);
@@ -301,7 +304,7 @@ class HmRadio {
         bool mSerialDebug;
 
     private:
-            bool getReceived(void) {
+        bool getReceived(void) {
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready); // resets the IRQ pin to HIGH
 

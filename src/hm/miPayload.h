@@ -349,6 +349,7 @@ class MiPayload {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
                                         mPayload[iv->id].retransmits = mMaxRetrans;
+                                        mPayload[iv->id].requested = false; //close failed request
                                     } else if( !mPayload[iv->id].gotFragment && !mPayload[iv->id].rxTmo ) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("retransmit on failed first request"));
@@ -485,18 +486,29 @@ class MiPayload {
             }
 
             uint16_t prntsts = statusMi == 3 ? 1 : statusMi;
+            bool stsok = true;
             if ( statusMi != mPayload[iv->id].sts[stschan] ) { //sth.'s changed?
                 iv->alarmCnt = 1; // minimum...
                 //sth is or was wrong?
                 if (iv->type != INV_TYPE_1CH && ( statusMi != 3
                                                 || mPayload[iv->id].sts[stschan] && statusMi == 3 && mPayload[iv->id].sts[stschan] != 3)
                    ) {
-                    iv->lastAlarm[stschan] = alarm_t(prntsts, mPayload[iv->id].ts,mPayload[iv->id].ts);
+                    iv->lastAlarm[stschan] = alarm_t(prntsts, mPayload[iv->id].ts,0);
                     iv->alarmCnt = iv->type == INV_TYPE_2CH ? 3 : 5;
-                    iv->alarmLastId = iv->alarmMesIndex;
                 }
+                iv->alarmLastId = prntsts; //iv->alarmMesIndex;
 
                 mPayload[iv->id].sts[stschan] = statusMi;
+                stsok = false;
+                if (iv->alarmCnt > 1) { //more than one channel
+                    for (uint8_t ch = 0; ch < (iv->alarmCnt); ++ch) { //start with 1
+                        if (mPayload[iv->id].sts[ch] == 3) {
+                            stsok = true;
+                            break;
+                        }
+                    }
+                }
+
                 if (mSerialDebug) {
                     DPRINT(DBG_WARN, F("New state on CH"));
                     DBGPRINT(String(stschan)); DBGPRINT(F(" ("));
@@ -505,9 +517,11 @@ class MiPayload {
                 }
             }
 
-            if ( !mPayload[iv->id].sts[0] || prntsts < mPayload[iv->id].sts[0] ) {
-                mPayload[iv->id].sts[0] = prntsts;
+            //if ( !mPayload[iv->id].sts[0] || prntsts < mPayload[iv->id].sts[0] ) {
+                //mPayload[iv->id].sts[0] = prntsts;
+            if (!stsok) {
                 iv->setValue(iv->getPosByChFld(0, FLD_EVT, rec), rec, prntsts);
+                iv->lastAlarm[0] = alarm_t(prntsts, mPayload[iv->id].ts, 0);
             }
 
             if (iv->alarmMesIndex < rec->record[iv->getPosByChFld(0, FLD_EVT, rec)]) {
@@ -517,21 +531,7 @@ class MiPayload {
                     DBGPRINT(F("alarm ID incremented to "));
                     DBGPRINTLN(String(iv->alarmMesIndex));
                 }
-                iv->lastAlarm[0] = alarm_t(prntsts, mPayload[iv->id].ts, mPayload[iv->id].ts);
             }
-            /*if(AlarmData == mPayload[iv->id].txCmd) {
-                                uint8_t i = 0;
-                                uint16_t code;
-                                uint32_t start, end;
-                                while(1) {
-                                    code = iv->parseAlarmLog(i++, payload, payloadLen, &start, &end);
-                                    if(0 == code)
-                                        break;
-                                    if (NULL != mCbAlarm)
-                                        (mCbAlarm)(code, start, end);
-                                    yield();
-                                }
-                            }*/
         }
 
         void miDataDecode(Inverter<> *iv, packet_t *p) {
@@ -819,8 +819,8 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].txCmd       = 0;
             mPayload[id].requested   = false;
             mPayload[id].ts          = *mTimestamp;
-            mPayload[id].sts[0]      = 0;
             if (clrSts) {                    // only clear channel states at startup
+                mPayload[id].sts[0]      = 0;
                 mPayload[id].sts[CH1]    = 0;
                 mPayload[id].sts[CH2]    = 0;
                 mPayload[id].sts[CH3]    = 0;

@@ -153,7 +153,11 @@ class Inverter {
         uint16_t      alarmCnt;          // counts the total number of occurred alarms
         uint16_t      alarmLastId;       // lastId which was received
         int8_t        rssi;              // accurate for HMS and HMT inverters only
-
+        uint16_t      mIvRxCnt;          // last iv rx frames (from GetLossRate)
+        uint16_t      mIvTxCnt;          // last iv tx frames (from GetLossRate)
+        uint16_t      mDtuRxCnt;         // cur dtu rx frames (since last GetLossRate)
+        uint16_t      mDtuTxCnt;         // cur dtu tx frames (since last getLoassRate)
+        uint8_t       mGetLossInterval;  // request iv every AHOY_GET_LOSS_INTERVAL RealTimeRunData_Debug
 
         static uint32_t *timestamp;      // system timestamp
         static cfgInst_t *generalConfig; // general inverter configuration from setup
@@ -211,6 +215,12 @@ class Inverter {
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
                     else if((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0))
                         enqueCommand<InfoCommand>(AlarmData);  // alarm not answered
+                        if ((mIvRxCnt || mIvTxCnt) && (mGetLossInterval < AHOY_GET_LOSS_INTERVAL)) { // initially mIvRxCnt = mIvTxCnt = 0
+                            mGetLossInterval++;
+                        } else {
+                            mGetLossInterval = 1;
+                            enqueCommand<InfoCommand>(GetLossRate);
+                        }
                     enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
                 } else { // if (ivGen == IV_MI){
                     if (getFwVersion() == 0) {
@@ -221,6 +231,7 @@ class Inverter {
                             enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version for missing HW part nr, delivered by frame 1
                         } else {
                             enqueCommand<InfoCommand>( type == INV_TYPE_4CH ? 0x36 : 0x09 );
+                            mGetLossInterval++;
                         }
                     }
                 }
@@ -597,6 +608,27 @@ class Inverter {
             alarmNxtWrPos = 0;
             alarmCnt = 0;
             alarmLastId = 0;
+        }
+
+        bool parseGetLossRate(uint8_t pyld[], uint8_t len) {
+            if (len == HMGETLOSSRATE_PAYLOAD_LEN) {
+                uint16_t rxCnt = (pyld[0] << 8) + pyld[1];
+                uint16_t txCnt = (pyld[2] << 8) + pyld[3];
+
+                if (mIvRxCnt || mIvTxCnt) {   // there was successful GetLossRate in the past
+                    DPRINT_IVID(DBG_INFO, id);
+                    DBGPRINTLN("Inv loss: " + String (mDtuTxCnt - (rxCnt - mIvRxCnt)) + " of " +
+                        String (mDtuTxCnt) + ", DTU loss: " +
+                        String (txCnt - mIvTxCnt - mDtuRxCnt) + " of " +
+                        String (txCnt - mIvTxCnt));
+                }
+                mIvRxCnt = rxCnt;
+                mIvTxCnt = txCnt;
+                mDtuRxCnt = 0;  // start new interval
+                mDtuTxCnt = 0;  // start new interval
+                return true;
+            }
+            return false;
         }
 
         uint16_t parseAlarmLog(uint8_t id, uint8_t pyld[], uint8_t len) {

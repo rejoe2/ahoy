@@ -128,10 +128,10 @@ class MiPayload {
                     DBGPRINT(F(" power limit "));
                     DBGPRINT(String(iv->powerLimit[0]));
                     DBGPRINT(F(" with PowerLimitControl "));
-                    DBGPRINTLN(String(iv->powerLimit[1]));
-                }
+                    DBGPRINTLN(String(iv->powerLimit[1]));                }
                 iv->powerLimitAck = false;
-                mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, false, false, iv->powerLimit[1] == RelativNonPersistent ? 0 : iv->getMaxPower()); // might be dependent on IV-Type as well, iv->type == INV_TYPE_4CH?
+                iv->mDtuTxCnt++;
+                mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, false, false, iv->powerLimit[1] == RelativNonPersistent ? 0 : iv->getMaxPower());
                 mPayload[iv->id].txCmd = iv->devControlCmd;
                 mPayload[iv->id].limitrequested = true;
 
@@ -149,6 +149,7 @@ class MiPayload {
                 if (cmd == 0x01) {    //0x1 for HM-types
                     cmd2 = 0x00;
                     cmd  = 0x0f;      // for MI, these seem to make part of polling the device software and hardware version number command
+                    iv->mIvRxCnt +=2;
                 } else if (cmd == SystemConfigPara ) { // 0x05 for HM-types
                     cmd2 = 0x00;
                     cmd  = 0x10;      // legacy GPF request
@@ -158,6 +159,7 @@ class MiPayload {
                     DBGPRINT(F("prepareDevInformCmd 0x"));
                     DBGHEXLN(cmd);
                 }
+                iv->mDtuTxCnt++;
                 mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd2, false, false);
 
                 mPayload[iv->id].txCmd = cmd;
@@ -170,12 +172,27 @@ class MiPayload {
                         mPayload[iv->id].dataAB[CH2] = false;
                         mPayload[iv->id].stsAB[CH2] = false;
                     }
+                    if (cmd == 0x09 || cmd == 0x11)
+                        iv->mIvRxCnt++;
                 }
+            }
+            if (iv->mGetLossInterval >= AHOY_GET_LOSS_INTERVAL) { // initially mIvRxCnt = mIvTxCnt = 0
+                iv->mGetLossInterval = 1;
+                if (mSerialDebug) {
+                    DPRINT_IVID(DBG_INFO, iv->id);
+                    DBGPRINTLN("DTU loss: " +
+                        String (iv->mDtuTxCnt + iv->mIvRxCnt - iv->mDtuRxCnt) + "/" +
+                        String (iv->mDtuTxCnt + iv->mIvRxCnt) + " frames for " +
+                        String (iv->mDtuTxCnt) + " requests");
+                }
+                iv->mIvRxCnt  = 0;  // start new interval, iVRxCnt is abused to collect additional possible frames
+                iv->mDtuRxCnt = 0;  // start new interval
+                iv->mDtuTxCnt = 0;  // start new interval
             }
         }
 
         void add(Inverter<> *iv, packet_t *p) {
-            //DPRINTLN(DBG_INFO, F("MI got data [0]=") + String(p->packet[0], HEX));
+            iv->mDtuRxCnt++;
             if (p->packet[0] == (0x08 + ALL_FRAMES)) { // 0x88; MI status response to 0x09
                 miStsDecode(iv, p);
             }
@@ -342,6 +359,7 @@ class MiPayload {
                             } else if(iv->devControlCmd == ActivePowerContr) {
                                 DPRINT_IVID(DBG_INFO, iv->id);
                                 DBGPRINTLN(F("retransmit power limit"));
+                                iv->mDtuTxCnt++;
                                 mRadio->sendControlPacket(iv->radioId.u64, iv->devControlCmd, iv->powerLimit, true, false, iv->powerLimit[1] == RelativNonPersistent ? 0 : iv->getMaxPower());
                             } else {
                                 uint8_t cmd = mPayload[iv->id].txCmd;
@@ -356,9 +374,11 @@ class MiPayload {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("retransmit on failed first request"));
                                         mPayload[iv->id].rxTmo = true;
+                                        iv->mDtuTxCnt++;
                                         mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd, true, false);
                                     } else if ( cmd == 0x0f ) {
                                         //hard/firmware request
+                                        iv->mDtuTxCnt++;
                                         mRadio->sendCmdPacket(iv->radioId.u64, 0x0f, 0x00, true, false);
                                         mPayload[id].multi_parts = 0;
                                     } else {
@@ -397,6 +417,7 @@ class MiPayload {
                                         DBGPRINT(F(" 0x"));
                                         DBGHEXLN(cmd);
                                         mPayload[id].multi_parts = 0;
+                                        iv->mDtuTxCnt++;
                                         mRadio->sendCmdPacket(iv->radioId.u64, cmd, cmd, true, false);
                                         yield();
                                     }
@@ -417,6 +438,7 @@ class MiPayload {
                                 DBGPRINT(F("prepareDevInformCmd 0x"));
                                 DBGHEXLN(mPayload[iv->id].txCmd);
                             }
+                            iv->mDtuTxCnt++;
                             mRadio->sendCmdPacket(iv->radioId.u64, mPayload[iv->id].txCmd, mPayload[iv->id].txCmd, false, false);
                         } else {
                             mPayload[iv->id].rxTmo = true;
@@ -425,19 +447,6 @@ class MiPayload {
                         if (!fastNext) {
                             mPayload[iv->id].rxTmo = true;
                         } else {
-                            /*iv->setQueuedCmdFinished();
-                            uint8_t cmd = iv->getQueuedCmd();
-                            if (mSerialDebug) {
-                                DPRINT_IVID(DBG_INFO, iv->id);
-                                DBGPRINT(F("fast mode "));
-                                DBGPRINT(F("prepareDevInformCmd 0x"));
-                                DBGHEXLN(cmd);
-                            }
-                            mStat->rxSuccess++;
-                            //mRadio->prepareDevInformCmd(iv->radioId.u64, cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
-                            mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(),
-                                iv->getNextTxChanIndex(), cmd, mPayload[iv->id].ts, iv->alarmMesIndex, false);
-                            mPayload[iv->id].txCmd = cmd; */
                             if (mHighPrioIv == NULL)
                                 mHighPrioIv = iv;
                         }
@@ -519,8 +528,6 @@ class MiPayload {
                 }
             }
 
-            //if ( !mPayload[iv->id].sts[0] || prntsts < mPayload[iv->id].sts[0] ) {
-                //mPayload[iv->id].sts[0] = prntsts;
             if (!stsok) {
                 iv->setValue(iv->getPosByChFld(0, FLD_EVT, rec), rec, prntsts);
                 iv->lastAlarm[0] = alarm_t(prntsts, mPayload[iv->id].ts, 0);

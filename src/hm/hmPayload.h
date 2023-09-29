@@ -147,8 +147,7 @@ class HmPayload {
                     DBGPRINTLN(String(iv->powerLimit[0]));
                 }
                 iv->powerLimitAck = false;
-                iv->mDtuTxCnt++;
-                mRadio->sendControlPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, false);
+                mRadio->sendControlPacket(iv, iv->devControlCmd, iv->powerLimit, false);
                 mPayload[iv->id].txCmd = iv->devControlCmd;
                 //iv->clearCmdQueue();
                 //iv->enqueCommand<InfoCommand>(SystemConfigPara); // read back power limit
@@ -159,8 +158,7 @@ class HmPayload {
                     DBGPRINT(F("prepareDevInformCmd 0x"));
                     DBGHEXLN(cmd);
                 }
-                iv->mDtuTxCnt++;
-                mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), cmd, mPayload[iv->id].ts, iv->alarmLastId, false);
+                mRadio->prepareDevInformCmd(iv, cmd, mPayload[iv->id].ts, iv->alarmLastId, false);
                 mPayload[iv->id].txCmd = cmd;
             }
         }
@@ -216,7 +214,6 @@ class HmPayload {
                         DBGPRINTLN(String(iv->powerLimit[1]));
                     }
 
-                    iv->mDtuTxCnt++;
                     iv->clearCmdQueue();
                     iv->enqueCommand<InfoCommand>(SystemConfigPara); // read back power limit
                     if(mHighPrioIv == NULL)                          // do it immediately if possible
@@ -268,8 +265,7 @@ class HmPayload {
                                 } else if(iv->devControlCmd == ActivePowerContr) {
                                     DPRINT_IVID(DBG_INFO, iv->id);
                                     DPRINTLN(DBG_INFO, F("retransmit power limit"));
-                                    iv->mDtuTxCnt++;
-                                    mRadio->sendControlPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), iv->devControlCmd, iv->powerLimit, true);
+                                    mRadio->sendControlPacket(iv, iv->devControlCmd, iv->powerLimit, true);
                                 } else {
                                     if(false == mPayload[iv->id].gotFragment) {
                                         DPRINT_IVID(DBG_WARN, iv->id);
@@ -281,8 +277,7 @@ class HmPayload {
                                             DBGPRINTLN(F("nothing received: complete retransmit"));
                                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
                                             DPRINTLN(DBG_INFO, F("(#") + String(iv->id) + F(") prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
-                                            iv->mDtuTxCnt++;
-                                            mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
+                                            mRadio->prepareDevInformCmd(iv, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
                                         }
                                     } else {
                                         for (uint8_t i = 0; i < (mPayload[iv->id].maxPackId - 1); i++) {
@@ -293,8 +288,7 @@ class HmPayload {
                                                     DBGPRINT(String(i + 1));
                                                     DBGPRINTLN(F(" missing: Request Retransmit"));
                                                 }
-                                                iv->mDtuTxCnt++;
-                                                mRadio->sendCmdPacket(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), TX_REQ_INFO, (SINGLE_FRAME + i), true);
+                                                mRadio->sendCmdPacket(iv, TX_REQ_INFO, (SINGLE_FRAME + i), true);
                                                 break;  // only request retransmit one frame per loop
                                             }
                                             yield();
@@ -316,8 +310,7 @@ class HmPayload {
                                 DBGPRINT(F("prepareDevInformCmd 0x"));
                                 DBGHEXLN(mPayload[iv->id].txCmd);
                             }
-                            iv->mDtuTxCnt++;
-                            mRadio->prepareDevInformCmd(iv->radioId.u64, iv->getType(), iv->getNextTxChanIndex(), mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmLastId, true);
+                            mRadio->prepareDevInformCmd(iv, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmLastId, true);
                         }
                     } else {  // payload complete
                         if (mSerialDebug) {

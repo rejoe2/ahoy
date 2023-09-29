@@ -25,6 +25,12 @@
 
 const char* const rf24AmpPowerNames[] = {"MIN", "LOW", "HIGH", "MAX"};
 
+#define TX_REQ_DREDCONTROL  0x50
+#define DRED_A5 0xa5
+#define DRED_5A 0x5a
+#define DRED_AA 0xaa
+#define DRED_55 0x55
+
 // Depending on the program, the module can work on 2403, 2423, 2440, 2461 or 2475MHz.
 // Channel List      2403, 2423, 2440, 2461, 2475MHz
 const uint8_t rf24ChLst[RF_CHANNELS] = { 3, 23, 40, 61, 75 };
@@ -195,11 +201,13 @@ class HmRadio {
             mSerialDebug = true;
         }
 
-        void sendControlPacket(uint64_t invId, inv_type_t invType, uint8_t txChan, uint8_t cmd, uint16_t *data, bool isRetransmit, bool isNoMI = true, uint16_t powerMax = 0) {
-            DPRINT(DBG_INFO, F("sendControlPacket cmd: 0x"));
+        void sendControlPacket(Inverter<> *iv, uint8_t cmd, uint16_t *data, bool isRetransmit, bool isNoMI = true, uint16_t powerMax = 0) {
+            DPRINT_IVID(DBG_INFO, iv->id);
+            DBGPRINT(F(" sendControlPacket cmd: 0x"));
             DBGHEXLN(cmd);
-            prepareReceive(invType, txChan, 1);
-            initPacket(invId, TX_REQ_DEVCONTROL, SINGLE_FRAME);
+            uint8_t txChan = iv->getNextTxChanIndex();
+            prepareReceive(iv->getType(), txChan, 1);
+            initPacket(iv->radioId.u64, TX_REQ_DEVCONTROL, SINGLE_FRAME);
             uint8_t cnt = 10;
             if (isNoMI) {
                 mTxBuf[cnt++] = cmd; // cmd -> 0 on, 1 off, 2 restart, 11 active power, 12 reactive power, 13 power factor
@@ -214,18 +222,17 @@ class HmRadio {
                 switch (cmd) {
                     case Restart:
                     case TurnOn:
-                        //mTxBuf[0] = 0x50;
-                        mTxBuf[9] = 0x55;
-                        mTxBuf[10] = 0xaa;
+                        mTxBuf[9]  = DRED_55;
+                        mTxBuf[10] = DRED_AA;
                         break;
                     case TurnOff:
-                        mTxBuf[9] = 0xaa;
-                        mTxBuf[10] = 0x55;
+                        mTxBuf[9]  = DRED_AA;
+                        mTxBuf[10] = DRED_55;
                         break;
                     case ActivePowerContr:
                         if (data[1]<256) { // non persistent
-                            mTxBuf[9] = 0x5a;
-                            mTxBuf[10] = 0x5a;
+                            mTxBuf[9]  = DRED_5A;
+                            mTxBuf[10] = DRED_5A;
                             //Testing only! Original NRF24_DTUMIesp.ino code #L612-L613:
                             //UsrData[0]=0x5A;UsrData[1]=0x5A;UsrData[2]=100;//0x0a;// 10% limit
                             //UsrData[3]=((Limit*10) >> 8) & 0xFF;   UsrData[4]= (Limit*10)  & 0xFF;   //WR needs 1 dec= zB 100.1 W
@@ -250,24 +257,24 @@ class HmRadio {
                             0xAA55	 DRM6 power limit 50%
                             0x5A55	 DRM8 unlimited power operation
                             */
-                            mTxBuf[0] = 0x50;
+                            mTxBuf[0] = TX_REQ_DREDCONTROL;
 
                             if (data[1] == 256UL) {   //     AbsolutPersistent
                                 if (data[0] == 0 && !powerMax) {
-                                    mTxBuf[9]  = 0xa5;
-                                    mTxBuf[10] = 0xa5;
+                                    mTxBuf[9]  = DRED_A5;
+                                    mTxBuf[10] = DRED_A5;
                                 } else if (data[0] == 0 || !powerMax || data[0] < powerMax/4 ) {
-                                    mTxBuf[9]  = 0x5a;
-                                    mTxBuf[10] = 0x5a;
+                                    mTxBuf[9]  = DRED_5A;
+                                    mTxBuf[10] = DRED_5A;
                                 } else if (data[0] <=  powerMax/4*3) {
-                                    mTxBuf[9]  = 0xaa;
-                                    mTxBuf[10] = 0x55;
+                                    mTxBuf[9]  = DRED_AA;
+                                    mTxBuf[10] = DRED_55;
                                 } else if (data[0] <=  powerMax) {
-                                    mTxBuf[9]  = 0x5a;
-                                    mTxBuf[10] = 0x55;
+                                    mTxBuf[9]  = DRED_5A;
+                                    mTxBuf[10] = DRED_55;
                                 } else if (data[0] > powerMax*2) {
-                                    mTxBuf[9]  = 0x55;
-                                    mTxBuf[10] = 0xaa;
+                                    mTxBuf[9]  = DRED_55;
+                                    mTxBuf[10] = DRED_AA;
                                 }
                             }
                         }
@@ -277,10 +284,12 @@ class HmRadio {
                 }
                 cnt++;
             }
-            sendPacket(invId, txChan, cnt, isRetransmit, isNoMI);
+            sendPacket(iv, txChan, cnt, isRetransmit, isNoMI);
         }
 
-        void prepareDevInformCmd(uint64_t invId, inv_type_t invType, uint8_t txChan, uint8_t cmd, uint32_t ts, uint16_t alarmMesId, bool isRetransmit, uint8_t reqfld=TX_REQ_INFO) { // might not be necessary to add additional arg.
+        void prepareDevInformCmd(Inverter<> *iv, uint8_t cmd, uint32_t ts, uint16_t alarmMesId, bool isRetransmit) {
+            inv_type_t invType = iv->getType();
+            uint8_t txChan     = iv->getNextTxChanIndex();
             if(mSerialDebug) {
                 DPRINT(DBG_DEBUG, F("prepareDevInformCmd 0x"));
                 DPRINTLN(DBG_DEBUG,String(cmd, HEX));
@@ -293,7 +302,7 @@ class HmRadio {
             }
 
             prepareReceive(invType, txChan, rxFrameCnt);
-            initPacket(invId, reqfld, ALL_FRAMES);
+            initPacket(iv->radioId.u64, TX_REQ_INFO, ALL_FRAMES);
             mTxBuf[10] = cmd; // cid
             mTxBuf[11] = 0x00;
             CP_U32_LittleEndian(&mTxBuf[12], ts);
@@ -301,13 +310,15 @@ class HmRadio {
                 mTxBuf[18] = (alarmMesId >> 8) & 0xff;
                 mTxBuf[19] = (alarmMesId     ) & 0xff;
             }
-            sendPacket(invId, txChan, 24, isRetransmit);
+            sendPacket(iv, txChan, 24, isRetransmit);
         }
 
-        void sendCmdPacket(uint64_t invId, inv_type_t invType, uint8_t txChan, uint8_t mid, uint8_t pid, bool isRetransmit, bool appendCrc16=true) {
+          void sendCmdPacket(Inverter<> *iv, uint8_t mid, uint8_t pid, bool isRetransmit, bool appendCrc16=true) {
+            inv_type_t invType = iv->getType();
+            uint8_t txChan = iv->getNextTxChanIndex();
             prepareReceive(invType, txChan, 1);
-            initPacket(invId, mid, pid);
-            sendPacket(invId, txChan, 10, isRetransmit, appendCrc16);
+            initPacket(iv->radioId.u64, mid, pid);
+            sendPacket(iv, txChan, 10, isRetransmit, appendCrc16);
         }
 
         uint8_t getDataRate(void) {
@@ -325,7 +336,7 @@ class HmRadio {
 
     private:
          void prepareReceive(inv_type_t invType, uint8_t txChan, uint8_t rxFrameCnt) {
-            if (invType) { // not INV_TYPE_DEFAULT
+            if (invType != INV_TYPE_DEFAULT) { // not INV_TYPE_DEFAULT
                 mRxAnswerTmo = rxFrameCnt * (RX_WAIT_SFR_TMO + RX_WAIT_SAFETY_MRGN); // current formula for hm inverters
                 if (mRxAnswerTmo > RX_ANSWER_TMO) {
                     mRxAnswerTmo = RX_ANSWER_TMO;
@@ -341,7 +352,7 @@ class HmRadio {
                     mMaxRxChannels = RX_DEF_MAX_CHANNELS; // no change
                 }
 
-            } else {
+            } else { // INV_TYPE_DEFAULT
                 mRxChannels = (uint8_t *)(rf24RxDefChan[txChan]);
                 mMaxRxChannels = RX_DEF_MAX_CHANNELS;
                 mRxAnswerTmo = RX_ANSWER_TMO;
@@ -392,9 +403,10 @@ class HmRadio {
             mTxBuf[9]  = pid;
         }
 
-        void sendPacket(uint64_t invId, uint8_t rf_ch, uint8_t len, bool isRetransmit, bool appendCrc16=true) {
+        void sendPacket(Inverter<> *iv, uint8_t rf_ch, uint8_t len, bool isRetransmit, bool appendCrc16=true) {
             //DPRINTLN(DBG_VERBOSE, F("hmRadio.h:sendPacket"));
             //DPRINTLN(DBG_VERBOSE, "sent packet: #" + String(mStat->txCnt));
+            uint64_t invId = iv->radioId.u64;
 
             // append crc's
             if (appendCrc16 && (len > 10)) {
@@ -432,6 +444,8 @@ class HmRadio {
                 mStat->retransmits++;
             else
                 mStat->txCnt++;
+
+            iv->mDtuTxCnt++;
         }
 
         volatile bool mIrqRcvd;

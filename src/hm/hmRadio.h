@@ -21,6 +21,8 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
+//#define AHOY_RADIO_TX_PENDING_LOOP
+
 const char* const rf24AmpPowerNames[] = {"MIN", "LOW", "HIGH", "MAX"};
 
 // Depending on the program, the module can work on 2403, 2423, 2440, 2461 or 2475MHz.
@@ -137,8 +139,18 @@ class HmRadio {
         }
 
         bool loop(void) {
+#ifdef AHOY_RADIO_TX_PENDING_LOOP
+            if (!mTxPending) {
+                return false;
+            }
+            mTxPending = false;
+            while (!mIrqRcvd) {
+                yield();
+            }
+#else
             if (!mIrqRcvd)
                 return false; // nothing to do
+#endif
             mIrqRcvd = false;
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready);  // resets the IRQ pin to HIGH
@@ -273,9 +285,9 @@ class HmRadio {
                 DPRINT(DBG_DEBUG, F("prepareDevInformCmd 0x"));
                 DPRINTLN(DBG_DEBUG,String(cmd, HEX));
             }
-            uint8_t rxFrameCnt = 10;
+            uint8_t rxFrameCnt = MAX_PAYLOAD_ENTRIES ;
             if (cmd == RealTimeRunData_Debug) {
-                rxFrameCnt = INV_TYPE_HMCH1+1;
+                rxFrameCnt = invType+1;
             } else if( (cmd == InverterDevInform_All) || (cmd == SystemConfigPara) || (GetLossRate)) {
                 rxFrameCnt = 1;
             }
@@ -413,6 +425,9 @@ class HmRadio {
             mNrf24.openWritingPipe(reinterpret_cast<uint8_t*>(&invId));
             mNrf24.startWrite(mTxBuf, len, false); // false = request ACK response
 
+#ifdef AHOY_RADIO_TX_PENDING_LOOP
+            mTxPending = true;
+#endif
             if(isRetransmit)
                 mStat->retransmits++;
             else
@@ -429,12 +444,14 @@ class HmRadio {
         uint32_t mRxAnswerTmo;       // max wait time in millis for answers of inverter
         uint32_t mRxChanTmo;         // max wait time in micros for a rx channel
 
-        volatile long mRfIrqTime[1 + MAX_PAYLOAD_ENTRIES];
-
         SPIClass* mSpi;
         RF24 mNrf24;
         uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
         statistics_t *mStat;
+
+#ifdef AHOY_RADIO_TX_PENDING_LOOP
+        bool mTxPending = false;            // send has been started: wait in loop to setup receive without break
+#endif
 };
 
 #endif /*__RADIO_H__*/

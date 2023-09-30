@@ -367,10 +367,12 @@ const devInfo_t devInfo[] = {
 #define RF_TX_TEST_CHAN_1ST_USE       0xff
 
 #define RX_ANSWER_TMO       400
+#define RX_ANSWER_TMO_ALARM 550
+#define RX_ANSWER_TMO_MI    200
 #define RX_WAIT_SFR_TMO     40
 #define RX_WAIT_SAFETY_MRGN 20
 
-#define RX_CHAN_TMO         5110
+#define RX_CHAN_TMO         5110 // 4088
 #define RX_CHAN_MHCH1_TMO   10220
 
 #define RX_DEF_MAX_CHANNELS RF_CHANNELS

@@ -243,20 +243,15 @@ class HmPayload {
                     uint8_t Fragments = 0;
                     crcPass = build(iv, &pyldComplete, &Fragments, &fastNext);
                     // evaluate quality of send channel with rcv params
-                    if ( (retransmit) && (mPayload[iv->id].requested) && (mPayload[iv->id].retransmits < mMaxRetrans) ) {
-                        iv->evalTxChanQuality (crcPass, mPayload[iv->id].retransmits,
-                            Fragments, mPayload[iv->id].lastFragments);
-                        if (mSerialDebug) {
-                            DPRINT_IVID(DBG_INFO, iv->id);
-                            DBGPRINT("Quality: ");
-                            iv->dumpTxChanQuality();
-                            DBGPRINTLN("");
-                        }
+                    if ( (retransmit) && (mPayload[iv->id].requested) && (mPayload[iv->id].retransmits < mMaxRetrans || (crcPass && pyldComplete)) ) {
+                        iv->evalTxChanQuality(crcPass, mPayload[iv->id].retransmits, Fragments, mPayload[iv->id].lastFragments, mSerialDebug,
+                             ((crcPass && pyldComplete) ||
+                             (mPayload[iv->id].rxTmo && !mPayload[iv->id].gotFragment)));
                     }
                     mPayload[iv->id].lastFragments = Fragments;
                     if (!crcPass && !pyldComplete) { // payload not complete
                         if ((mPayload[iv->id].requested) && (retransmit)) {
-                            if (mPayload[iv->id].retransmits < mMaxRetrans) {
+                            if (mPayload[iv->id].retransmits < (mPayload[iv->id].txCmd != AlarmData ? mMaxRetrans : mMaxRetrans*4)) {
                                 mPayload[iv->id].retransmits++;
                                 if (iv->devControlCmd == Restart || iv->devControlCmd == CleanState_LockAndAlarm) {
                                     // This is required to prevent retransmissions without answer.
@@ -359,8 +354,10 @@ class HmPayload {
                         if (NULL == rec) {
                             if(GetLossRate == mPayload[iv->id].txCmd) {
                                 if ((mPayload[iv->id].txId == (TX_REQ_INFO + ALL_FRAMES)) &&
-                                    iv->parseGetLossRate (payload, payloadLen)) {
+                                    iv->parseGetLossRate(payload, payloadLen)) {
                                     mStat->rxSuccess++;
+                                    if (mHighPrioIv == NULL)
+                                        mHighPrioIv = iv;
                                 } else {
                                     mStat->rxFail++;
                                 }
@@ -451,7 +448,7 @@ class HmPayload {
                 return false;
 
             //requests to cause the next request to be executed immediately
-            if (mPayload[iv->id].gotFragment && ((mPayload[iv->id].txCmd < 11) || (mPayload[iv->id].txCmd > 18))) {
+            if (mPayload[iv->id].gotFragment && ((mPayload[iv->id].txCmd < RealTimeRunData_Debug) || (mPayload[iv->id].txCmd >= AlarmData))) {
                 *fastNext = true;
             }
 

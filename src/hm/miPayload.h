@@ -253,7 +253,7 @@ class MiPayload {
                 mPayload[iv->id].txId = p->packet[0];
                 iv->clearDevControlRequest();
                 mStat->rxSuccess++;
-                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0);
+                iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0, mSerialDebug, true);
 
                 if ((p->packet[9] == DRED_5A) && (p->packet[10] == DRED_5A)) {
                     mApp->setMqttPowerLimitAck(iv);
@@ -365,7 +365,6 @@ class MiPayload {
                           && (mPayload[iv->id].retransmits < mMaxRetrans)
                           && !gotAllMsgParts ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
 
-                        //iv->evalTxChanQuality (gotAllMsgParts, mPayload[iv->id].retransmits,
                         bool allParts;
                         uint8_t qFrag = mPayload[iv->id].fragments;
                         if (iv->type == INV_TYPE_4CH) {
@@ -377,8 +376,7 @@ class MiPayload {
                             }
                         }
                         if (mPayload[iv->id].evaluate_q)
-                            miEvalTxChanQuality (iv, allParts, mPayload[iv->id].req_rtrnsmts,
-                                qFrag, mPayload[iv->id].lastFragments);
+                            iv->evalTxChanQuality(allParts, mPayload[iv->id].req_rtrnsmts, qFrag, mPayload[iv->id].lastFragments, mSerialDebug, ((gotAllMsgParts && pyldComplete) || mPayload[iv->id].rxTmo));
                     }
 
                     mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
@@ -610,8 +608,7 @@ class MiPayload {
                 mPayload[iv->id].dataAB[datachan] = true;
                 if ( p->packet[0] == 0x89 || p->packet[0] == 0x91 ) {
                     if ( mPayload[iv->id].multi_parts == 7 ) {
-  //                    miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, 2, mPayload[iv->id].lastFragments);
-                        miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0);
+                        iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0, mSerialDebug, true);
                         mPayload[iv->id].evaluate_q = false;
                     }
                 }
@@ -628,7 +625,7 @@ class MiPayload {
                   FCODE = (uint8_t)(p->packet[27]);
                 }*/
                 miStsConsolidate(iv, datachan, rec, p->packet[23], p->packet[24]);
-                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+                iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments, mSerialDebug, (p->packet[0] == (0x39 + ALL_FRAMES)) );
 
                 if (p->packet[0] < (0x39 + ALL_FRAMES) ) {
                     mPayload[iv->id].txCmd++;
@@ -833,7 +830,7 @@ const byteAssign_t InfoAssignment[] = {
                 mPayload[iv->id].rxTmo    = true;
                 mPayload[iv->id].requested= false;
                 mStat->rxSuccess++;
-                miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+                iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments, mSerialDebug, true);
             }
             if (mHighPrioIv == NULL)
                 mHighPrioIv = iv;
@@ -850,7 +847,7 @@ const byteAssign_t InfoAssignment[] = {
             iv->setValue(3, rec, (uint32_t) (((p->packet[12] << 8) | p->packet[13]))); //FLD_GRID_PROFILE_VERSION
             iv->setQueuedCmdFinished();
             mStat->rxSuccess++;
-            miEvalTxChanQuality(iv, true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments);
+            iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments, mSerialDebug, true);
 
 /* according to xlsx (different start byte -1!)
  Polling Grid-connected Protection Parameter File Command - Receipt
@@ -869,18 +866,6 @@ const byteAssign_t InfoAssignment[] = {
             }
             if (mHighPrioIv == NULL)
                 mHighPrioIv = iv;
-        }
-
-
-        void miEvalTxChanQuality(Inverter<> *iv, bool gotAll, uint8_t Retransmits, uint8_t rxFragments,
-            uint8_t lastRxFragments) {
-            iv->evalTxChanQuality( gotAll, Retransmits, rxFragments, lastRxFragments);
-            if (mSerialDebug) {
-                DPRINT_IVID(DBG_INFO, iv->id);
-                DBGPRINT("Quality: ");
-                iv->dumpTxChanQuality();
-                DBGPRINTLN("");
-            }
         }
 
         void reset(uint8_t id, bool setTxTmo = true, bool clrSts = false) {

@@ -170,7 +170,7 @@ class HmRadio {
             uint32_t loopMillis = millis();
             while (millis()-loopMillis < mRxAnswerTmo) {
                 while (micros()-startMicros < mRxChanTmo) {  // listen (4088us or?) 5110us to each channel
-                        if (mIrqRcvd) {
+                    if (mIrqRcvd) {
                         mIrqRcvd = false;
                         if (getReceived()) {        // everything received
                             return true;
@@ -202,9 +202,11 @@ class HmRadio {
         }
 
         void sendControlPacket(Inverter<> *iv, uint8_t cmd, uint16_t *data, bool isRetransmit, bool isNoMI = true, uint16_t powerMax = 0) {
-            DPRINT_IVID(DBG_INFO, iv->id);
-            DBGPRINT(F(" sendControlPacket cmd: 0x"));
-            DBGHEXLN(cmd);
+            if (mSerialDebug) {
+                DPRINT_IVID(DBG_INFO, iv->id);
+                DBGPRINT(F(" sendControlPacket cmd: 0x"));
+                DBGHEXLN(cmd);
+            }
             uint8_t txChan = iv->getNextTxChanIndex();
             prepareReceive(iv->getType(), txChan, 1);
             initPacket(iv->radioId.u64, TX_REQ_DEVCONTROL, SINGLE_FRAME);
@@ -290,14 +292,15 @@ class HmRadio {
         void prepareDevInformCmd(Inverter<> *iv, uint8_t cmd, uint32_t ts, uint16_t alarmMesId, bool isRetransmit) {
             inv_type_t invType = iv->getType();
             uint8_t txChan     = iv->getNextTxChanIndex();
-            if(mSerialDebug) {
-                DPRINT(DBG_DEBUG, F("prepareDevInformCmd 0x"));
-                DPRINTLN(DBG_DEBUG,String(cmd, HEX));
+            if(mSerialDebug && (DEBUG_LEVEL >= DBG_DEBUG)) {
+                DPRINT_IVID(DBG_DEBUG, iv->id);
+                DBGPRINT(F("prepareDevInformCmd 0x"));
+                DBGPRINTLN(String(cmd, HEX));
             }
-            uint8_t rxFrameCnt = MAX_PAYLOAD_ENTRIES ;
+            uint8_t rxFrameCnt = MAX_PAYLOAD_ENTRIES;
             if (cmd == RealTimeRunData_Debug) {
-                rxFrameCnt = invType+1;
-            } else if( (cmd == InverterDevInform_All) || (cmd == SystemConfigPara) || (GetLossRate)) {
+                rxFrameCnt = invType*2; //+1;
+            } else if( (cmd == InverterDevInform_All) || (cmd == SystemConfigPara) || (GetLossRate) ) {
                 rxFrameCnt = 1;
             }
 
@@ -309,6 +312,7 @@ class HmRadio {
             if (cmd == AlarmData ) { //cmd == RealTimeRunData_Debug ||
                 mTxBuf[18] = (alarmMesId >> 8) & 0xff;
                 mTxBuf[19] = (alarmMesId     ) & 0xff;
+                mRxAnswerTmo = RX_ANSWER_TMO_ALARM;
             }
             sendPacket(iv, txChan, 24, isRetransmit);
         }
@@ -316,7 +320,7 @@ class HmRadio {
           void sendCmdPacket(Inverter<> *iv, uint8_t mid, uint8_t pid, bool isRetransmit, bool appendCrc16=true) {
             inv_type_t invType = iv->getType();
             uint8_t txChan = iv->getNextTxChanIndex();
-            prepareReceive(invType, txChan, 1);
+            prepareReceive(invType, txChan, 1); // (iv->getQueuedCmd() != AlarmData) ? 1 : 2);
             initPacket(iv->radioId.u64, mid, pid);
             sendPacket(iv, txChan, 10, isRetransmit, appendCrc16);
         }
@@ -355,7 +359,7 @@ class HmRadio {
             } else { // INV_TYPE_DEFAULT
                 mRxChannels = (uint8_t *)(rf24RxDefChan[txChan]);
                 mMaxRxChannels = RX_DEF_MAX_CHANNELS;
-                mRxAnswerTmo = RX_ANSWER_TMO;
+                mRxAnswerTmo = RX_ANSWER_TMO_MI;
                 mRxChanTmo = RX_CHAN_TMO;
             }
         }

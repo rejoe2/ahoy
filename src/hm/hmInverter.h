@@ -759,11 +759,11 @@ class Inverter {
             }
         }
 
-        bool isNewTxChan () {
+        bool isNewTxChan() {
             return mBestTxChanIndex != mLastBestTxChanIndex;
         }
 
-        uint8_t getNextTxChanIndex (void) {
+        uint8_t getNextTxChanIndex(void) {
             // start with the next index: round robbin in case of same 'best' quality
             uint8_t curIndex = (mBestTxChanIndex + 1) % RF_CHANNELS;
 
@@ -800,7 +800,7 @@ class Inverter {
             return mBestTxChanIndex;
         }
 
-        void addTxChanQuality (int8_t quality) {
+        void addTxChanQuality(int8_t quality) {
             quality = mTxChanQuality[mBestTxChanIndex] + quality;
             if (quality < RF_TX_CHAN_MIN_QUALITY) {
                 quality = RF_TX_CHAN_MIN_QUALITY;
@@ -810,8 +810,8 @@ class Inverter {
             mTxChanQuality[mBestTxChanIndex] = quality;
         }
 
-        void evalTxChanQuality (bool crcPass, uint8_t Retransmits, uint8_t rxFragments, uint8_t lastRxFragments) {
-            if (!Retransmits || isNewTxChan ()) {
+        void evalTxChanQuality(bool crcPass, uint8_t Retransmits, uint8_t rxFragments, uint8_t lastRxFragments, bool serialDebug = true, bool dgb_info = false) {
+            if (!Retransmits || isNewTxChan()) {
                 if (mTestPeriodSendCnt < 0xff) {
                     mTestPeriodSendCnt++;
                 }
@@ -823,7 +823,7 @@ class Inverter {
                         // we want _QUALITY_OK at least: switch back to orig quality
                         mTxChanQuality[mBestTxChanIndex] = mSaveOldTestChanQuality;
                     }
-                    addTxChanQuality (RF_TX_CHAN_QUALITY_BAD);
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_BAD);
                     if (mTestPeriodFailCnt < 0xff) {
                         mTestPeriodFailCnt++;
                     }
@@ -831,27 +831,27 @@ class Inverter {
             } else if (!lastRxFragments && crcPass) {
                 if (!Retransmits || isNewTxChan()) {
                     // every fragment received successfull immediately
-                    addTxChanQuality (RF_TX_CHAN_QUALITY_GOOD);
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_GOOD);
                 } else {
                     // every fragment received successfully
-                    addTxChanQuality (RF_TX_CHAN_QUALITY_OK);
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_OK);
                 }
             } else if (crcPass) {
-                if (isNewTxChan ()) {
+                if (isNewTxChan()) {
                     // last Fragment successfully received on new send channel
-                    addTxChanQuality (RF_TX_CHAN_QUALITY_OK);
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_OK);
                 }
             } else if (!Retransmits || isNewTxChan()) {
                 // no complete receive for this send channel
                 if (rxFragments - lastRxFragments > 2) {
                     // graceful evaluation for big inverters that have to send 4 answer packets
-                    addTxChanQuality (RF_TX_CHAN_QUALITY_OK);
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_OK);
                 } else if (rxFragments - lastRxFragments < 2) {
                     if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
                         // we want _QUALITY_OK at least: switch back to orig quality
                         mTxChanQuality[mBestTxChanIndex] = mSaveOldTestChanQuality;
                     }
-                    addTxChanQuality (RF_TX_CHAN_QUALITY_LOW);
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_LOW);
                     if (mTestPeriodFailCnt < 0xff) {
                         mTestPeriodFailCnt++;
                     }
@@ -860,6 +860,18 @@ class Inverter {
             if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
                 // special evaluation of test channel only at the beginning of current test period
                 mTestTxChanIndex = mBestTxChanIndex;
+            }
+            if (serialDebug) {
+                if (dgb_info || (DEBUG_LEVEL >= DBG_DEBUG)) {
+                    DPRINT_IVID(dgb_info ? DBG_INFO : DBG_DEBUG, id);
+                    DBGPRINT("Quality: ");
+                    //dumpTxChanQuality();
+                    for(uint8_t i = 0; i < RF_CHANNELS; i++) {
+                        DBGPRINT(" " + String (mTxChanQuality[i]));
+                    }
+                    DBGPRINTLN(", Cnt " + String (mTestPeriodSendCnt) + ", Fail " + String (mTestPeriodFailCnt));
+                    //DBGPRINTLN("");
+                }
             }
         }
 

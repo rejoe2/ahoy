@@ -78,6 +78,14 @@ enum {CH0 = 0, CH1, CH2, CH3, CH4, CH5, CH6};
 enum {INV_TYPE_1CH = 0, INV_TYPE_2CH, INV_TYPE_4CH, INV_TYPE_6CH};
 
 
+typedef enum {                  // for radio special handling
+    INV_TYPE_DEFAULT,
+    INV_TYPE_HMCH1,
+    INV_TYPE_HMCH2,
+    INV_TYPE_HMCH4,
+} inv_type_t;
+
+
 typedef struct {
     uint8_t    fieldId; // field id
     uint8_t    unitId;  // uint id
@@ -130,6 +138,8 @@ const byteAssign_t AlarmDataAssignment[] = {
 #define HMALARMDATA_PAYLOAD_LEN  0 // 0: means check is off
 #define ALARM_LOG_ENTRY_SIZE    12
 
+#define HMGETLOSSRATE_PAYLOAD_LEN 4
+#define AHOY_GET_LOSS_INTERVAL 10
 
 //-------------------------------------
 // HM300, HM350, HM400
@@ -336,5 +346,36 @@ const devInfo_t devInfo[] = {
     { 0x103311, 1800 },
     { 0x103331, 2250 }
 };
+
+#define RF_CHANNELS         5
+#define AHOY_RF24_DEF_TX_CHANNEL 2 // 40
+#define AHOY_RF24_DEF_RX_CHANNEL 0 // 3
+
+// Send channel heuristic has 2 strategies:
+// - Evaluation of current send channel quality due to receive situation and compare with others
+#define RF_TX_CHAN_MAX_QUALITY        4
+#define RF_TX_CHAN_MIN_QUALITY       -6
+#define RF_TX_CHAN_QUALITY_GOOD       2
+#define RF_TX_CHAN_QUALITY_OK         1
+#define RF_TX_CHAN_QUALITY_NEUTRAL    0
+#define RF_TX_CHAN_QUALITY_LOW       -1
+#define RF_TX_CHAN_QUALITY_BAD       -2
+// - if more than _MAX_FAIL_CNT problems during _MAX_SEND_CNT test period: try another chan and see if it works (even) better
+#define RF_TEST_PERIOD_MAX_FAIL_CNT   5
+#define RF_TEST_PERIOD_MAX_SEND_CNT   50
+// mark current test chan as 1st use during this test period
+#define RF_TX_TEST_CHAN_1ST_USE       0xff
+
+#define RX_ANSWER_TMO       400
+#define RX_ANSWER_TMO_ALARM 550
+#define RX_ANSWER_TMO_MI    200
+#define RX_WAIT_SFR_TMO     40
+#define RX_WAIT_SAFETY_MRGN 20
+
+#define RX_CHAN_TMO         5110 // 4088
+#define RX_CHAN_MHCH1_TMO   10220
+
+#define RX_DEF_MAX_CHANNELS RF_CHANNELS
+#define RX_HMCH1_MAX_CHANNELS 2
 
 #endif /*__HM_DEFINES_H__*/

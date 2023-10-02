@@ -20,6 +20,7 @@
 typedef struct {
     uint8_t txCmd;
     uint8_t txId;
+    uint8_t invId;
     uint32_t ts;
     uint8_t data[MAX_PAYLOAD_ENTRIES][MAX_RF_PAYLOAD_SIZE];
     int8_t rssi[MAX_PAYLOAD_ENTRIES];
@@ -32,6 +33,7 @@ typedef struct {
     bool gotFragment;
     bool rxTmo;
     uint32_t sendMillis;
+    uint8_t lastFragments; // for send quality measurement
 } invPayload_t;
 
 
@@ -47,7 +49,7 @@ class HmPayload {
         void setup(IApp *app, HMSYSTEM *sys, uint8_t maxRetransmits, uint32_t *timestamp) {
             mApp        = app;
             mSys        = sys;
-            mMaxRetrans = maxRetransmits;
+                        mMaxRetrans = maxRetransmits;
             mTimestamp  = timestamp;
             for(uint8_t i = 0; i < MAX_NUM_INVERTERS; i++) {
                 reset(i);
@@ -178,6 +180,7 @@ class HmPayload {
         }
 
         void add(Inverter<> *iv, packet_t *p) {
+            iv->mDtuRxCnt++;
             if (p->packet[0] == (TX_REQ_INFO + ALL_FRAMES)) {  // response from get information command
                 mPayload[iv->id].txId = p->packet[0];
                 DPRINTLN(DBG_DEBUG, F("Response from info request received"));
@@ -255,8 +258,16 @@ class HmPayload {
 
                 if (!mPayload[iv->id].complete) {
                     bool crcPass, pyldComplete, fastNext;
-
-                    crcPass = build(iv, &pyldComplete, &fastNext);
+                    uint8_t Fragments = 0;
+                    crcPass = build(iv, &pyldComplete, &Fragments, &fastNext);
+                    // evaluate quality of send channel with rcv params
+                    if ( (mPayload[iv->id].requested) && ((crcPass && pyldComplete) || (retransmit) &&  (mPayload[iv->id].retransmits < mMaxRetrans)) ) {
+                    //if ( (retransmit) && (mPayload[iv->id].requested) && (mPayload[iv->id].retransmits < mMaxRetrans || (crcPass && pyldComplete)) ) {
+                        iv->evalTxChanQuality(crcPass, mPayload[iv->id].retransmits, Fragments, mPayload[iv->id].lastFragments, mSerialDebug,
+                             ((crcPass && pyldComplete) ||
+                             (mPayload[iv->id].rxTmo && !mPayload[iv->id].gotFragment)));
+                    }
+                    mPayload[iv->id].lastFragments = Fragments;
                     if (!crcPass && !pyldComplete) { // payload not complete
                         if ((mPayload[iv->id].requested) && (retransmit)) {
                             if (mPayload[iv->id].retransmits < mMaxRetrans) {
@@ -275,6 +286,7 @@ class HmPayload {
                                         if (mPayload[iv->id].rxTmo) {
                                             DBGPRINTLN(F("nothing received"));
                                             mPayload[iv->id].retransmits = mMaxRetrans;
+                                            mPayload[iv->id].requested = false; //close failed request
                                         } else {
                                             DBGPRINTLN(F("nothing received: complete retransmit"));
                                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
@@ -360,7 +372,18 @@ class HmPayload {
                         }
 
                         if (NULL == rec) {
-                            DPRINTLN(DBG_ERROR, F("record is NULL!"));
+                            if(GetLossRate == mPayload[iv->id].txCmd) {
+                                if ((mPayload[iv->id].txId == (TX_REQ_INFO + ALL_FRAMES)) &&
+                                    iv->parseGetLossRate(payload, payloadLen)) {
+                                    iv->radioStatistics.rxSuccess++;
+                                    if (mHighPrioIv == NULL)
+                                        mHighPrioIv = iv;
+                                } else {
+                                    iv->radioStatistics.rxFail++;
+                                }
+                            } else {
+                                DPRINTLN(DBG_ERROR, F("record is NULL!"));
+                            }
                         } else if ((rec->pyldLen == payloadLen) || (0 == rec->pyldLen)) {
                             if (mPayload[iv->id].txId == (TX_REQ_INFO + ALL_FRAMES))
                                 iv->radioStatistics.rxSuccess++;
@@ -385,19 +408,7 @@ class HmPayload {
                                 }
                             }
                             if (fastNext && (mHighPrioIv == NULL)) {
-                                /*iv->setQueuedCmdFinished();
-                                uint8_t cmd = iv->getQueuedCmd();
-                                if (mSerialDebug) {
-                                    DPRINT_IVID(DBG_INFO, iv->id);
-                                    DBGPRINT(F("fast mode "));
-                                    DBGPRINT(F("prepareDevInformCmd 0x"));
-                                    DBGHEXLN(cmd);
-                                }
-                                iv->radioStatistics.rxSuccess++;
-                                iv->radio->prepareDevInformCmd(iv, cmd, mPayload[iv->id].ts, iv->alarmLastId, false);
-                                mPayload[iv->id].txCmd = cmd;
-                                */
-                                mHighPrioIv = iv;
+                               mHighPrioIv = iv;
                             }
 
                         } else {
@@ -422,7 +433,7 @@ class HmPayload {
                 (mCbPayload)(val, iv);
         }
 
-        bool build(Inverter<> *iv, bool *complete, bool *fastNext ) {
+        bool build(Inverter<> *iv, bool *complete, uint8_t *fragments, bool *fastNext ) {
             DPRINTLN(DBG_VERBOSE, F("build"));
             uint16_t crc = 0xffff, crcRcv = 0x0000;
             if (mPayload[iv->id].maxPackId > MAX_PAYLOAD_ENTRIES)
@@ -434,6 +445,8 @@ class HmPayload {
             for (uint8_t i = 0; i < mPayload[iv->id].maxPackId; i++) {
                 if(mPayload[iv->id].len[i] == 0) {
                     *complete = false;
+                } else {
+                    (*fragments)++;
                 }
             }
             if(!*complete)
@@ -476,6 +489,7 @@ class HmPayload {
             mPayload[id].ts          = *mTimestamp;
             mPayload[id].rxTmo       = setTxTmo; // design: don't start with complete retransmit
             mPayload[id].sendMillis  = millis();
+            mPayload[id].lastFragments = 0; // for send channel quality measurement
         }
 
         IApp *mApp;

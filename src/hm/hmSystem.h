@@ -68,11 +68,11 @@ class HmSystem {
                     iv->type = INV_TYPE_6CH;
             } else if(iv->config->serial.u64 != 0ULL) {
                 DPRINTLN(DBG_ERROR, F("inverter type can't be detected!"));
-                return;
+return;
             } else
                 iv->ivGen = IV_UNKNOWN;
 
-            iv->init();
+iv->init();
             mNumInv ++;
             if(IV_UNKNOWN == iv->ivGen)
                 return; // serial is 0

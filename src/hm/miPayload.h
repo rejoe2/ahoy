@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 // 2023 Ahoy, https://ahoydtu.de
-// Creative Commons - https://creativecommons.org/licenses/by-nc-sa/4.0/deed
+// Creative Commons - http://creativecommons.org/licenses/by-nc-sa/3.0/de/
 //-----------------------------------------------------------------------------
 
 #ifndef __MI_PAYLOAD_H__
@@ -33,6 +33,10 @@ typedef struct {
     uint8_t rtrRes; // for limiting resets
     uint8_t multi_parts;  // for quality
     bool rxTmo;
+    uint8_t req_rtrnsmts; // for quality
+    bool evaluate_q;     // for quality
+    uint8_t fragments;
+    uint8_t lastFragments;
 } miPayload_t;
 
 
@@ -47,7 +51,7 @@ class MiPayload {
         void setup(IApp *app, HMSYSTEM *sys, uint8_t maxRetransmits, uint32_t *timestamp) {
             mApp        = app;
             mSys        = sys;
-            mMaxRetrans = maxRetransmits;
+                        mMaxRetrans = maxRetransmits;
             mTimestamp  = timestamp;
             for(uint8_t i = 0; i < MAX_NUM_INVERTERS; i++) {
                 reset(i, false, true);
@@ -97,7 +101,7 @@ class MiPayload {
                                 DBGPRINTLN(F("enqueued cmd failed/timeout"));
                         } else {
                             iv->radioStatistics.rxFail++;        // got "fragments" (part of the required messages)
-                                                    // but no complete set of responses
+                                                                 // but no complete set of responses
                             if (mSerialDebug) {
                                 DBGPRINT(F("no complete Payload received! (retransmits: "));
                                 DBGPRINT(String(mPayload[iv->id].retransmits));
@@ -141,7 +145,7 @@ class MiPayload {
                 uint8_t cmd = iv->getQueuedCmd();
                 uint8_t cmd2 = cmd;
                 if ( cmd == SystemConfigPara ) { //0x05 for HM-types
-                    if (!mPayload[iv->id].gotGPF) {
+                    if (mPayload[iv->id].gotGPF) {
                         iv->setQueuedCmdFinished();
                         cmd = iv->getQueuedCmd();
                     }
@@ -150,6 +154,7 @@ class MiPayload {
                 if (cmd == 0x01) {    //0x1 for HM-types
                     cmd2 = 0x00;
                     cmd  = 0x0f;      // for MI, these seem to make part of polling the device software and hardware version number command
+                    iv->mIvRxCnt +=2;
                 } else if (cmd == SystemConfigPara ) { // 0x05 for HM-types
                     cmd2 = 0x00;
                     cmd  = 0x10;      // legacy GPF request
@@ -171,18 +176,35 @@ class MiPayload {
                         mPayload[iv->id].dataAB[CH2] = false;
                         mPayload[iv->id].stsAB[CH2] = false;
                     }
+                    if (cmd == MI_REQ_CH1 || cmd == MI_REQ_CH2)
+                        iv->mIvRxCnt++;  // statistics workaround...
                 }
+            }
+            if (iv->mGetLossInterval >= AHOY_GET_LOSS_INTERVAL) { // initially mIvRxCnt = mIvTxCnt = 0
+                iv->mGetLossInterval = 1;
+                if (mSerialDebug) {
+                    DPRINT_IVID(DBG_INFO, iv->id);
+                    DBGPRINTLN("DTU loss: " +
+                        String (iv->mDtuTxCnt + iv->mIvRxCnt - iv->mDtuRxCnt) + "/" +
+                        String (iv->mDtuTxCnt + iv->mIvRxCnt) + " frames for " +
+                        String (iv->mDtuTxCnt) + " requests");
+                }
+                iv->mIvRxCnt  = 0;  // start new interval, iVRxCnt is abused to collect additional possible frames
+                iv->mDtuRxCnt = 0;  // start new interval
+                iv->mDtuTxCnt = 0;  // start new interval
             }
         }
 
         void add(Inverter<> *iv, packet_t *p) {
-            //DPRINTLN(DBG_INFO, F("MI got data [0]=") + String(p->packet[0], HEX));
+            iv->mDtuRxCnt++;
             if (p->packet[0] == (0x88)) { // 0x88 is MI status response to 0x09
                 miStsDecode(iv, p);
+                mPayload[iv->id].rssi[2] = p->rssi;
             }
 
             else if (p->packet[0] == (MI_REQ_CH2 + SINGLE_FRAME)) { // 0x92; MI status response to 0x11
                 miStsDecode(iv, p, CH2);
+                mPayload[iv->id].rssi[3] = p->rssi;
 
             } else if ( p->packet[0] == MI_REQ_CH1 + ALL_FRAMES ||
                         p->packet[0] == MI_REQ_CH2 + ALL_FRAMES ||
@@ -218,8 +240,8 @@ class MiPayload {
                     iv->setQueuedCmdFinished();
                     iv->clearCmdQueue();
                 }
-            } else if (p->packet[0] == (TX_REQ_DEVCONTROL + ALL_FRAMES )       // response from dev control command
-                    || p->packet[0] == (TX_REQ_DEVCONTROL + ALL_FRAMES -1)) {  // response from DRED instruction
+            } else if (p->packet[0] == (TX_REQ_DEVCONTROL + ALL_FRAMES)       // response from dev control command
+                    || p->packet[0] == (TX_REQ_DREDCONTROL + ALL_FRAMES)) {   // response from DRED instruction
 #if DEBUG_LEVEL >= DBG_DEBUG
                 if (mSerialDebug) {
                     DPRINT_IVID(DBG_DEBUG, iv->id);
@@ -228,8 +250,10 @@ class MiPayload {
 #endif
                 mPayload[iv->id].txId = p->packet[0];
                 iv->clearDevControlRequest();
+                iv->radioStatistics.rxSuccess++;
+                iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0, mSerialDebug, true);
 
-                if ((p->packet[9] == 0x5a) && (p->packet[10] == 0x5a)) {
+                if ((p->packet[9] == DRED_5A) && (p->packet[10] == DRED_5A)) {
                     mApp->setMqttPowerLimitAck(iv);
                     iv->powerLimitAck = true;
                     if (mSerialDebug) {
@@ -333,6 +357,28 @@ class MiPayload {
                 if (!mPayload[iv->id].complete) {
                     bool gotAllMsgParts, pyldComplete, fastNext;
                     gotAllMsgParts = build(iv, &pyldComplete, &fastNext);
+
+                    // evaluate quality of send channel with rcv params
+                    if ( (retransmit) && (mPayload[iv->id].requested)
+                          && (mPayload[iv->id].retransmits < mMaxRetrans)
+                          && !gotAllMsgParts ) { //(!mPayload[iv->id].rxTmo && !pyldComplete) ) {//(mPayload[iv->id].requested) && (!mPayload[iv->id].complete) ) {
+
+                        bool allParts;
+                        uint8_t qFrag = mPayload[iv->id].fragments;
+                        if (iv->type == INV_TYPE_4CH) {
+                            allParts = !mPayload[iv->id].retransmits ? true : false;
+                        } else {
+                            allParts = mPayload[id].multi_parts == 7 ? true : false;
+                            if (!allParts) {
+                                qFrag = mPayload[iv->id].req_rtrnsmts;
+                            }
+                        }
+                        if (mPayload[iv->id].evaluate_q)
+                            iv->evalTxChanQuality(allParts, mPayload[iv->id].req_rtrnsmts, qFrag, mPayload[iv->id].lastFragments, mSerialDebug, ((gotAllMsgParts && pyldComplete) || mPayload[iv->id].rxTmo));
+                    }
+
+                    mPayload[iv->id].lastFragments = mPayload[iv->id].fragments;
+
                     if (!gotAllMsgParts && !pyldComplete) { // payload not complete
                         if ((mPayload[iv->id].requested) && (retransmit)) {
                             if (iv->devControlCmd == Restart || iv->devControlCmd == CleanState_LockAndAlarm) {
@@ -349,6 +395,7 @@ class MiPayload {
                                 uint8_t cmd = mPayload[iv->id].txCmd;
                                 if (mPayload[iv->id].retransmits < mMaxRetrans) {
                                     mPayload[iv->id].retransmits++;
+                                    mPayload[iv->id].req_rtrnsmts++;
                                     if( !mPayload[iv->id].gotFragment && mPayload[iv->id].rxTmo ) {
                                         DPRINT_IVID(DBG_INFO, iv->id);
                                         DBGPRINTLN(F("nothing received"));
@@ -392,6 +439,7 @@ class MiPayload {
                                             DBGPRINT(F("next request is"));
                                             mPayload[iv->id].txCmd = cmd;
                                             mPayload[iv->id].rtrRes++;
+                                            mPayload[iv->id].req_rtrnsmts = 0;
                                         } else {
                                             DBGPRINT(F("sth."));
                                             DBGPRINT(F(" missing: Request Retransmit"));
@@ -410,6 +458,7 @@ class MiPayload {
                     } else if(!gotAllMsgParts && pyldComplete) { // crc error on complete Payload
                         if (mPayload[iv->id].retransmits < mMaxRetrans) {
                             mPayload[iv->id].retransmits++;
+                            mPayload[iv->id].req_rtrnsmts++;
                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
                             mPayload[id].multi_parts  = 0;
                             if (mSerialDebug) {
@@ -448,6 +497,8 @@ class MiPayload {
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);  // choose the record structure
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
+            mPayload[iv->id].evaluate_q = true;
             mPayload[iv->id].multi_parts += 3;
             mPayload[iv->id].txId = p->packet[0];
             miStsConsolidate(iv, stschan, rec, p->packet[10], p->packet[12], p->packet[9], p->packet[11]);
@@ -527,6 +578,7 @@ class MiPayload {
             record_t<> *rec = iv->getRecordStruct(RealTimeRunData_Debug);  // choose the parser
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
             mPayload[iv->id].multi_parts += 4;
 
             uint8_t datachan = ( p->packet[0] == (MI_REQ_CH1 + ALL_FRAMES) || p->packet[0] == (MI_REQ_4CH + ALL_FRAMES) ) ? CH1 :
@@ -551,6 +603,12 @@ class MiPayload {
 
             if ( datachan < 3 ) {
                 mPayload[iv->id].dataAB[datachan] = true;
+                if ( p->packet[0] == 0x89 || p->packet[0] == 0x91 ) {
+                    if ( mPayload[iv->id].multi_parts == 7 ) {
+                        iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, 0, mSerialDebug, true);
+                        mPayload[iv->id].evaluate_q = false;
+                    }
+                }
             }
             if ( !mPayload[iv->id].dataAB[CH0] && mPayload[iv->id].dataAB[CH1] && mPayload[iv->id].dataAB[CH2] ) {
                 mPayload[iv->id].dataAB[CH0] = true;
@@ -564,6 +622,7 @@ class MiPayload {
                   FCODE = (uint8_t)(p->packet[27]);
                 }*/
                 miStsConsolidate(iv, datachan, rec, p->packet[23], p->packet[24]);
+                iv->evalTxChanQuality(true, mPayload[iv->id].retransmits, mPayload[iv->id].fragments, mPayload[iv->id].lastFragments, mSerialDebug, (p->packet[0] == (0x39 + ALL_FRAMES)) );
 
                 if (p->packet[0] < (0x39 + ALL_FRAMES) ) {
                     mPayload[iv->id].txCmd++;
@@ -630,6 +689,7 @@ class MiPayload {
                 if ((txCmd == MI_REQ_CH1) || (txCmd == MI_REQ_CH2)) {
                     if (mPayload[iv->id].stsAB[CH0] && mPayload[iv->id].dataAB[CH0]) {
                       miComplete(iv);
+                      mPayload[iv->id].evaluate_q = true;
                       return true;
                     }
                     return false;
@@ -656,6 +716,7 @@ class MiPayload {
             record_t<> *rec = iv->getRecordStruct(InverterDevInform_All);  // choose the record structure
             rec->ts = mPayload[iv->id].ts;
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
 
 /*
 Polling the device software and hardware version number command
@@ -768,13 +829,14 @@ const byteAssign_t InfoAssignment[] = {
                 mPayload[iv->id].rxTmo    = true;
                 mPayload[iv->id].requested= false;
                 iv->radioStatistics.rxSuccess++;
-            }
+                            }
             if (mHighPrioIv == NULL)
                 mHighPrioIv = iv;
         }
 
         void miGPFDecode(Inverter<> *iv, packet_t *p ) {
             mPayload[iv->id].gotFragment = true;
+            mPayload[iv->id].fragments++;
             mPayload[iv->id].gotGPF = true;
 
             record_t<> *rec = iv->getRecordStruct(InverterDevInform_Simple);  // choose the record structure
@@ -808,6 +870,10 @@ const byteAssign_t InfoAssignment[] = {
             mPayload[id].gotFragment = false;
             mPayload[id].rxTmo       = setTxTmo;// design: don't start with complete retransmit
             mPayload[id].rtrRes      = 0;
+            mPayload[id].evaluate_q  = true;
+            mPayload[id].fragments   = 0;
+            mPayload[id].lastFragments = 0;  // for send channel quality measurement
+            mPayload[id].req_rtrnsmts = 0;
             mPayload[id].multi_parts = 0;
             mPayload[id].retransmits = 0;
             mPayload[id].complete    = false;

@@ -185,10 +185,14 @@ class HmPayload {
                 DPRINTLN(DBG_DEBUG, F("Response from info request received"));
                 uint8_t *pid = &p->packet[9];
                 if (*pid == 0x00) {
+#if DEBUG_LEVEL >= DBG_DEBUG
                     DPRINTLN(DBG_DEBUG, F("fragment number zero received and ignored"));
+#endif
                 } else {
+#if DEBUG_LEVEL >= DBG_DEBUG
                     DPRINT(DBG_DEBUG, F("PID: 0x"));
                     DPRINTLN(DBG_DEBUG, String(*pid, HEX));
+#endif
                     if ((*pid & 0x7F) < MAX_PAYLOAD_ENTRIES) {
                         memcpy(mPayload[iv->id].data[(*pid & 0x7F) - 1], &p->packet[10], p->len - 11);
                         mPayload[iv->id].len[(*pid & 0x7F) - 1] = p->len - 11;
@@ -206,8 +210,9 @@ class HmPayload {
                     }
                 }
             } else if (p->packet[0] == (TX_REQ_DEVCONTROL + ALL_FRAMES)) { // response from dev control command
+#if DEBUG_LEVEL >= DBG_DEBUG
                 DPRINTLN(DBG_DEBUG, F("Response from devcontrol request received"));
-
+#endif
                 mPayload[iv->id].txId = p->packet[0];
                 iv->clearDevControlRequest();
 
@@ -260,8 +265,10 @@ class HmPayload {
                     uint8_t Fragments = 0;
                     crcPass = build(iv, &pyldComplete, &Fragments, &fastNext);
                     // evaluate quality of send channel with rcv params
-                    if ( (mPayload[iv->id].requested) && ((crcPass && pyldComplete) || (retransmit) &&  (mPayload[iv->id].retransmits < mMaxRetrans)) ) {
+                    //if ( (mPayload[iv->id].requested) && ((crcPass && pyldComplete) || (retransmit) &&  (mPayload[iv->id].retransmits < mMaxRetrans)) ) {
                     //if ( (retransmit) && (mPayload[iv->id].requested) && (mPayload[iv->id].retransmits < mMaxRetrans || (crcPass && pyldComplete)) ) {
+                    //if (retransmit && mPayload[iv->id].requested && (mPayload[iv->id].retransmits <= mMaxRetrans)) {
+                    if (retransmit && mPayload[iv->id].requested) {
                         iv->evalTxChanQuality(crcPass, mPayload[iv->id].retransmits, Fragments, mPayload[iv->id].lastFragments, mSerialDebug,
                              ((crcPass && pyldComplete) ||
                              (mPayload[iv->id].rxTmo && !mPayload[iv->id].gotFragment)));
@@ -273,24 +280,32 @@ class HmPayload {
                                 mPayload[iv->id].retransmits++;
                                 if (iv->devControlCmd == Restart || iv->devControlCmd == CleanState_LockAndAlarm) {
                                     // This is required to prevent retransmissions without answer.
-                                    DPRINTLN(DBG_INFO, F("Prevent retransmit on Restart / CleanState_LockAndAlarm..."));
-                                    mPayload[iv->id].retransmits = mMaxRetrans;
+                                    if (mSerialDebug)
+                                        DPRINTLN(DBG_INFO, F("Prevent retransmit on Restart / CleanState_LockAndAlarm..."));
+                                    //mPayload[iv->id].retransmits = mMaxRetrans;
+                                    mPayload[iv->id].requested = false;
                                 } else if(iv->devControlCmd == ActivePowerContr) {
-                                    DPRINT_IVID(DBG_INFO, iv->id);
-                                    DPRINTLN(DBG_INFO, F("retransmit power limit"));
+                                    if (mSerialDebug) {
+                                        DPRINT_IVID(DBG_INFO, iv->id);
+                                        DBGPRINTLN(F("retransmit power limit"));
+                                    }
                                     iv->radio->sendControlPacket(iv, iv->devControlCmd, iv->powerLimit, true);
                                 } else {
                                     if(false == mPayload[iv->id].gotFragment) {
-                                        DPRINT_IVID(DBG_WARN, iv->id);
+                                        if (mSerialDebug)
+                                            DPRINT_IVID(DBG_WARN, iv->id);
                                         if (mPayload[iv->id].rxTmo) {
-                                            DBGPRINTLN(F("nothing received"));
-                                            mPayload[iv->id].retransmits = mMaxRetrans;
+                                            if (mSerialDebug)
+                                                DBGPRINTLN(F("nothing received"));
+                                            //mPayload[iv->id].retransmits = mMaxRetrans;
                                             mPayload[iv->id].requested = false; //close failed request
                                         } else {
-                                            DBGPRINTLN(F("nothing received: complete retransmit"));
                                             mPayload[iv->id].txCmd = iv->getQueuedCmd();
-                                            DPRINTLN(DBG_INFO, F("(#") + String(iv->id) + F(") prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
-                                            iv->radio->prepareDevInformCmd(iv, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmMesIndex, true);
+                                            if (mSerialDebug) {
+                                                DBGPRINTLN(F("nothing received: complete retransmit"));
+                                                DPRINTLN(DBG_INFO, F("(#") + String(iv->id) + F(") prepareDevInformCmd 0x") + String(mPayload[iv->id].txCmd, HEX));
+                                            }
+                                            iv->radio->prepareDevInformCmd(iv, mPayload[iv->id].txCmd, mPayload[iv->id].ts, iv->alarmLastId, true);
                                         }
                                     } else {
                                         for (uint8_t i = 0; i < (mPayload[iv->id].maxPackId - 1); i++) {

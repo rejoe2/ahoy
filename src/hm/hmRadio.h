@@ -178,8 +178,8 @@ class HmRadio : public Radio {
                 DBGPRINT(F(" sendControlPacket cmd: 0x"));
                 DBGHEXLN(cmd);
             }
-            mTxChan = iv->getNextTxChanIndex();
-            prepareReceive(iv->getType(), mTxChan, 1);
+            iv->getNextTxChanIndex();
+            prepareReceive(iv, 1);
             initPacket(iv->radioId.u64, TX_REQ_DEVCONTROL, SINGLE_FRAME);
             uint8_t cnt = 10;
             if (isNoMI) {
@@ -261,8 +261,7 @@ class HmRadio : public Radio {
         }
 
         void prepareDevInformCmd(Inverter<> *iv, uint8_t cmd, uint32_t ts, uint16_t alarmMesId, bool isRetransmit) {
-            inv_type_t invType = iv->getType();
-            mTxChan     = iv->getNextTxChanIndex();
+            iv->getNextTxChanIndex();
 #if DEBUG_LEVEL >= DBG_DEBUG
             if(mSerialDebug) {
                 DPRINT_IVID(DBG_DEBUG, iv->id);
@@ -272,12 +271,15 @@ class HmRadio : public Radio {
 #endif
             uint8_t rxFrameCnt = MAX_PAYLOAD_ENTRIES;
             if (cmd == RealTimeRunData_Debug) {
-                rxFrameCnt = invType*2; //+1;
+                rxFrameCnt = iv->type == INV_TYPE_1CH ? 2 :
+                             iv->type == INV_TYPE_2CH ? 3 :
+                             iv->type == INV_TYPE_4CH ? 5 : 10;// invType*2; //+1;
+                             //needs review for 2ch devices!
             } else if( (cmd == InverterDevInform_All) || (cmd == SystemConfigPara) || (GetLossRate) ) {
                 rxFrameCnt = 1;
             }
 
-            prepareReceive(invType, mTxChan, rxFrameCnt);
+            prepareReceive(iv, rxFrameCnt);
             initPacket(iv->radioId.u64, TX_REQ_INFO, ALL_FRAMES);
             mTxBuf[10] = cmd; // cid
             mTxBuf[11] = 0x00;
@@ -291,9 +293,8 @@ class HmRadio : public Radio {
         }
 
         void sendCmdPacket(Inverter<> *iv, uint8_t mid, uint8_t pid, bool isRetransmit, bool appendCrc16=true) {
-            inv_type_t invType = iv->getType();
-            mTxChan = iv->getNextTxChanIndex();
-            prepareReceive(invType, mTxChan, 1); // (iv->getQueuedCmd() != AlarmData) ? 1 : 2);
+            iv->getNextTxChanIndex();
+            prepareReceive(iv, 1); // (iv->getQueuedCmd() != AlarmData) ? 1 : 2);
             initPacket(iv->radioId.u64, mid, pid);
             sendPacket(iv, 10, isRetransmit, appendCrc16);
         }
@@ -311,25 +312,26 @@ class HmRadio : public Radio {
         std::queue<packet_t> mBufCtrl;
 
     private:
-         void prepareReceive(inv_type_t invType, uint8_t txChan, uint8_t rxFrameCnt) {
-            if (invType != INV_TYPE_DEFAULT) { // not INV_TYPE_DEFAULT
-                mRxAnswerTmo = rxFrameCnt * (RX_WAIT_SFR_TMO + RX_WAIT_SAFETY_MRGN); // current formula for hm inverters
+         void prepareReceive(Inverter<> *iv, uint8_t rxFrameCnt) {
+            // prepareReceive(iv->getType(), iv->mNextTxChan, 1);
+            if (iv->ivGen != IV_MI) { // not INV_TYPE_DEFAULT
+                mRxAnswerTmo = rxFrameCnt * (iv->type+1) * (RX_WAIT_SFR_TMO + RX_WAIT_SAFETY_MRGN); // current formula for hm inverters
                 if (mRxAnswerTmo > RX_ANSWER_TMO) {
                     mRxAnswerTmo = RX_ANSWER_TMO;
                 }
 
-                if (invType == INV_TYPE_HMCH1) {
-                    mRxChannels = (uint8_t *)(rf24RxHMCh1[txChan]);
+                if (iv->type == INV_TYPE_1CH) {
+                    mRxChannels = (uint8_t *)(rf24RxHMCh1[iv->mNextTxChan]);
                     mMaxRxChannels = RX_HMCH1_MAX_CHANNELS;
                     mRxChanTmo = RX_CHAN_MHCH1_TMO;
                 } else {
                     mRxChanTmo = RX_CHAN_TMO; // no change
-                    mRxChannels = (uint8_t *)(rf24RxDefChan[txChan]); // no change
+                    mRxChannels = (uint8_t *)(rf24RxDefChan[iv->mNextTxChan]); // no change
                     mMaxRxChannels = RX_DEF_MAX_CHANNELS; // no change
                 }
 
-            } else { // INV_TYPE_DEFAULT
-                mRxChannels = (uint8_t *)(rf24RxDefChan[txChan]);
+            } else { // MI type
+                mRxChannels = (uint8_t *)(rf24RxDefChan[iv->mNextTxChan]);
                 mMaxRxChannels = RX_DEF_MAX_CHANNELS;
                 mRxAnswerTmo = RX_ANSWER_TMO_MI;
                 mRxChanTmo = RX_CHAN_TMO;
@@ -369,7 +371,7 @@ class HmRadio : public Radio {
             updateCrcs(&len, appendCrc16);
 
             // set TX and RX channels
-            mTxChIdx = mTxChan;
+            mTxChIdx = iv->mNextTxChan;
             mRxChIdx = 0;
 
             if(mSerialDebug) {
@@ -404,8 +406,7 @@ class HmRadio : public Radio {
         uint64_t DTU_RADIO_ID;
 
         uint8_t  mRxChIdx;           // cur index in mRxChannels
-        uint8_t  mTxChIdx;
-        uint8_t  mTxChan;            // tx channel for rx preparation
+        uint8_t  mTxChIdx;           // cur index in mTxChannels
         uint8_t  *mRxChannels;       // rx channel to be used; depends on inverter and previous tx channel
         uint8_t  mMaxRxChannels;     // actual size of mRxChannels; depends on inverter and previous tx channel
         uint32_t mRxAnswerTmo;       // max wait time in millis for answers of inverter

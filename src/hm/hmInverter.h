@@ -18,6 +18,38 @@
 #include "../config/settings.h"
 
 #include "radio.h"
+
+#define RF_CHANNELS         5
+#define AHOY_RF24_DEF_TX_CHANNEL 2 // 40
+#define AHOY_RF24_DEF_RX_CHANNEL 0 // 3
+
+// Send channel heuristic has 2 strategies:
+// - Evaluation of current send channel quality due to receive situation and compare with others
+#define RF_TX_CHAN_MAX_QUALITY        4
+#define RF_TX_CHAN_MIN_QUALITY       -6
+#define RF_TX_CHAN_QUALITY_GOOD       2
+#define RF_TX_CHAN_QUALITY_OK         1
+#define RF_TX_CHAN_QUALITY_NEUTRAL    0
+#define RF_TX_CHAN_QUALITY_LOW       -1
+#define RF_TX_CHAN_QUALITY_BAD       -2
+// - if more than _MAX_FAIL_CNT problems during _MAX_SEND_CNT test period: try another chan and see if it works (even) better
+#define RF_TEST_PERIOD_MAX_FAIL_CNT   5
+#define RF_TEST_PERIOD_MAX_SEND_CNT   50
+// mark current test chan as 1st use during this test period
+#define RF_TX_TEST_CHAN_1ST_USE       0xff
+
+#define RX_ANSWER_TMO       400
+#define RX_ANSWER_TMO_ALARM 550
+#define RX_ANSWER_TMO_MI    200
+#define RX_WAIT_SFR_TMO     40
+#define RX_WAIT_SAFETY_MRGN 20
+
+#define RX_CHAN_TMO         5110 // 4088
+#define RX_CHAN_MHCH1_TMO   10220
+
+#define RX_DEF_MAX_CHANNELS RF_CHANNELS
+#define RX_HMCH1_MAX_CHANNELS 2
+
 /**
  * For values which are of interest and not transmitted by the inverter can be
  * calculated automatically.
@@ -153,6 +185,7 @@ class Inverter {
         Radio         *radio;            // pointer to associated radio class
         statistics_t  radioStatistics;   // information about transmitted, failed
         int8_t        mTxChanQuality[RF_CHANNELS]; // qualities of send channels
+        uint8_t       mNextTxChan;          // next tx channel index after rx preparation
         uint8_t       mBestTxChanIndex;     // current send chan index
         uint8_t       mLastBestTxChanIndex; // last send chan index
         uint8_t       mTestTxChanIndex;     // Index of last test chan (or special value RF_TX_TEST_CHAN for 1st use)
@@ -221,16 +254,19 @@ class Inverter {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // firmware version
                     else if (getHwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
-                    else if((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0))
+                    else if ((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0)) {
+                        if (alarmMesIndex>alarmLastId+10)
+                            alarmLastId = alarmMesIndex - 10;  // limit to last 10 alarms for subsequent trials
                         enqueCommand<InfoCommand>(AlarmData);  // alarm not answered
-                        if ((mIvRxCnt || mIvTxCnt) && (mGetLossInterval < AHOY_GET_LOSS_INTERVAL)) { // initially mIvRxCnt = mIvTxCnt = 0
-                            mGetLossInterval++;
-                        } else {
-                            mGetLossInterval = 1;
-                            enqueCommand<InfoCommand>(GetLossRate);
-                        }
+                    }
+                    if ((mIvRxCnt || mIvTxCnt) && (mGetLossInterval < AHOY_GET_LOSS_INTERVAL)) {
+                        mGetLossInterval++;
+                    } else {
+                        mGetLossInterval = 1;
+                        enqueCommand<InfoCommand>(GetLossRate);
+                    }
                     enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
-                } else { // if (ivGen == IV_MI){
+                } else { // ivGen == IV_MI
                     if (getFwVersion() == 0) {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version
                     } else {
@@ -440,22 +476,6 @@ class Inverter {
                 }
                 yield();
             }
-        }
-
-        inv_type_t getType () {
-            if (ivGen == IV_HM) {
-                switch (type) {
-                    case INV_TYPE_1CH:
-                        return INV_TYPE_HMCH1;
-                    case INV_TYPE_2CH:
-                        return INV_TYPE_HMCH2;
-                    case INV_TYPE_4CH:
-                        return INV_TYPE_HMCH4;
-                    default:
-                        return INV_TYPE_DEFAULT;
-                }
-            }
-            return INV_TYPE_DEFAULT;
         }
 
         bool isAvailable() {

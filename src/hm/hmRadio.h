@@ -315,7 +315,7 @@ class HmRadio : public Radio {
          void prepareReceive(Inverter<> *iv, uint8_t rxFrameCnt) {
             // prepareReceive(iv->getType(), iv->mNextTxChan, 1);
             if (iv->ivGen != IV_MI) { // not INV_TYPE_DEFAULT
-                mRxAnswerTmo = rxFrameCnt * (iv->type+1) * (RX_WAIT_SFR_TMO + RX_WAIT_SAFETY_MRGN); // current formula for hm inverters
+                mRxAnswerTmo = rxFrameCnt * (RX_WAIT_SFR_TMO + RX_WAIT_SAFETY_MRGN); // current formula for hm inverters
                 if (mRxAnswerTmo > RX_ANSWER_TMO) {
                     mRxAnswerTmo = RX_ANSWER_TMO;
                 }

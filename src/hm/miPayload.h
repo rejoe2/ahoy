@@ -30,11 +30,11 @@ typedef struct {
     uint8_t retransmits;
     bool gotFragment;
     bool gotGPF;
-    uint8_t rtrRes; // for limiting resets
+    uint8_t rtrRes;       // prevent looping retransmission resets
     uint8_t multi_parts;  // for quality
     bool rxTmo;
+    bool evaluate_q;      // for quality
     uint8_t req_rtrnsmts; // for quality
-    bool evaluate_q;     // for quality
     uint8_t fragments;
     uint8_t lastFragments;
 } miPayload_t;

@@ -18,6 +18,38 @@
 #include "../config/settings.h"
 
 #include "radio.h"
+
+#define RF_CHANNELS         5
+#define AHOY_RF24_DEF_TX_CHANNEL 2 // 40
+#define AHOY_RF24_DEF_RX_CHANNEL 0 // 3
+
+// Send channel heuristic has 2 strategies:
+// - Evaluation of current send channel quality due to receive situation and compare with others
+#define RF_TX_CHAN_MAX_QUALITY        4
+#define RF_TX_CHAN_MIN_QUALITY       -6
+#define RF_TX_CHAN_QUALITY_GOOD       2
+#define RF_TX_CHAN_QUALITY_OK         1
+#define RF_TX_CHAN_QUALITY_NEUTRAL    0
+#define RF_TX_CHAN_QUALITY_LOW       -1
+#define RF_TX_CHAN_QUALITY_BAD       -2
+// - if more than _MAX_FAIL_CNT problems during _MAX_SEND_CNT test period: try another chan and see if it works (even) better
+#define RF_TEST_PERIOD_MAX_FAIL_CNT   5
+#define RF_TEST_PERIOD_MAX_SEND_CNT   50
+// mark current test chan as 1st use during this test period
+#define RF_TX_TEST_CHAN_1ST_USE       0xff
+
+#define RX_ANSWER_TMO       400
+#define RX_ANSWER_TMO_ALARM 550
+#define RX_ANSWER_TMO_MI    200
+#define RX_WAIT_SFR_TMO     40
+#define RX_WAIT_SAFETY_MRGN 20
+
+#define RX_CHAN_TMO         5110 // 4088
+#define RX_CHAN_MHCH1_TMO   10220
+
+#define RX_DEF_MAX_CHANNELS RF_CHANNELS
+#define RX_HMCH1_MAX_CHANNELS 2
+
 /**
  * For values which are of interest and not transmitted by the inverter can be
  * calculated automatically.
@@ -151,8 +183,20 @@ class Inverter {
         uint16_t      alarmLastId;       // lastId which was received
         int8_t        rssi;              // RSSI
         Radio         *radio;            // pointer to associated radio class
-        statistics_t  radioStatistics;   // information about transmitted, failed, ... packets
-
+        statistics_t  radioStatistics;   // information about transmitted, failed
+        int8_t        mTxChanQuality[RF_CHANNELS]; // qualities of send channels
+        uint8_t       mNextTxChan;          // next tx channel index after rx preparation
+        uint8_t       mBestTxChanIndex;     // current send chan index
+        uint8_t       mLastBestTxChanIndex; // last send chan index
+        uint8_t       mTestTxChanIndex;     // Index of last test chan (or special value RF_TX_TEST_CHAN for 1st use)
+        uint8_t       mTestPeriodSendCnt;   // increment of current test period
+        uint8_t       mTestPeriodFailCnt;   // no of fails during current test period
+        uint8_t       mSaveOldTestChanQuality;  // original quality of current TestTxChanIndex
+        uint16_t      mIvRxCnt;          // last iv rx frames (from GetLossRate)
+        uint16_t      mIvTxCnt;          // last iv tx frames (from GetLossRate)
+        uint16_t      mDtuRxCnt;         // cur dtu rx frames (since last GetLossRate)
+        uint16_t      mDtuTxCnt;         // cur dtu tx frames (since last getLoassRate)
+        uint8_t       mGetLossInterval;  // request iv every AHOY_GET_LOSS_INTERVAL RealTimeRunData_Debug
 
         static uint32_t *timestamp;      // system timestamp
         static cfgInst_t *generalConfig; // general inverter configuration from setup
@@ -174,6 +218,8 @@ class Inverter {
             alarmLastId        = 0;
             rssi               = -127;
             memset(&radioStatistics, 0, sizeof(statistics_t));
+            mBestTxChanIndex   = AHOY_RF24_DEF_TX_CHANNEL ? AHOY_RF24_DEF_TX_CHANNEL - 1 : RF_CHANNELS - 1;
+            mLastBestTxChanIndex = AHOY_RF24_DEF_TX_CHANNEL;
         }
 
         ~Inverter() {
@@ -208,10 +254,19 @@ class Inverter {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // firmware version
                     else if (getHwVersion() == 0)
                         enqueCommand<InfoCommand>(InverterDevInform_Simple); // hardware version
-                    else if((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0))
+                    else if ((alarmLastId != alarmMesIndex) && (alarmMesIndex != 0)) {
+                        if (alarmMesIndex>alarmLastId+10)
+                            alarmLastId = alarmMesIndex - 10;  // limit to last 10 alarms for subsequent trials
                         enqueCommand<InfoCommand>(AlarmData);  // alarm not answered
+                    }
+                    if ((mIvRxCnt || mIvTxCnt) && (mGetLossInterval < AHOY_GET_LOSS_INTERVAL)) {
+                        mGetLossInterval++;
+                    } else {
+                        mGetLossInterval = 1;
+                        enqueCommand<InfoCommand>(GetLossRate);
+                    }
                     enqueCommand<InfoCommand>(RealTimeRunData_Debug);  // live data
-                } else { // if (ivGen == IV_MI){
+                } else { // ivGen == IV_MI
                     if (getFwVersion() == 0) {
                         enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version
                     } else {
@@ -220,6 +275,7 @@ class Inverter {
                             enqueCommand<InfoCommand>(InverterDevInform_All); // hard- and firmware version for missing HW part nr, delivered by frame 1
                         } else {
                             enqueCommand<InfoCommand>( type == INV_TYPE_4CH ? 0x36 : 0x09 );
+                            mGetLossInterval++;
                         }
                     }
                 }
@@ -595,6 +651,27 @@ class Inverter {
             alarmLastId = 0;
         }
 
+        bool parseGetLossRate(uint8_t pyld[], uint8_t len) {
+            if (len == HMGETLOSSRATE_PAYLOAD_LEN) {
+                uint16_t rxCnt = (pyld[0] << 8) + pyld[1];
+                uint16_t txCnt = (pyld[2] << 8) + pyld[3];
+
+                if (mIvRxCnt || mIvTxCnt) {   // there was successful GetLossRate in the past
+                    DPRINT_IVID(DBG_INFO, id);
+                    DBGPRINTLN("Inv loss: " + String (mDtuTxCnt - (rxCnt - mIvRxCnt)) + " of " +
+                        String (mDtuTxCnt) + ", DTU loss: " +
+                        String (txCnt - mIvTxCnt - mDtuRxCnt) + " of " +
+                        String (txCnt - mIvTxCnt));
+                }
+                mIvRxCnt = rxCnt;
+                mIvTxCnt = txCnt;
+                mDtuRxCnt = 0;  // start new interval
+                mDtuTxCnt = 0;  // start new interval
+                return true;
+            }
+            return false;
+        }
+
         uint16_t parseAlarmLog(uint8_t id, uint8_t pyld[], uint8_t len) {
             uint8_t startOff = 2 + id * ALARM_LOG_ENTRY_SIZE;
             if((startOff + ALARM_LOG_ENTRY_SIZE) > len)
@@ -697,6 +774,130 @@ class Inverter {
                 default:   return String(F("Unknown"));
             }
         }
+
+        bool isNewTxChan() {
+            return mBestTxChanIndex != mLastBestTxChanIndex;
+        }
+
+        uint8_t getNextTxChanIndex(void) {
+            // start with the next index: round robbin in case of same 'best' quality
+            uint8_t curIndex = (mBestTxChanIndex + 1) % RF_CHANNELS;
+
+            mLastBestTxChanIndex = mBestTxChanIndex;
+            mBestTxChanIndex = curIndex;
+            curIndex = (curIndex + 1) % RF_CHANNELS;
+            for (uint16_t i=1; i<RF_CHANNELS; i++) {
+                if (mTxChanQuality[curIndex] > mTxChanQuality[mBestTxChanIndex]) {
+                    mBestTxChanIndex = curIndex;
+                }
+                curIndex = (curIndex + 1) % RF_CHANNELS;
+            }
+            if ((mBestTxChanIndex == mLastBestTxChanIndex) && (mTestPeriodSendCnt >= RF_TEST_PERIOD_MAX_SEND_CNT)) {
+                if (mTestPeriodFailCnt > RF_TEST_PERIOD_MAX_FAIL_CNT) {
+                    // try round robbin another chan and see if it works even better
+                    mTestTxChanIndex = (mTestTxChanIndex + 1) % RF_CHANNELS;
+                    if (mTestTxChanIndex == mBestTxChanIndex) {
+                        mTestTxChanIndex = (mTestTxChanIndex + 1) % RF_CHANNELS;
+                    }
+                    // give it a fair chance but remember old status in case of immediate fail
+                    mSaveOldTestChanQuality = mTxChanQuality[mTestTxChanIndex];
+                    mTxChanQuality[mTestTxChanIndex] = mTxChanQuality[mBestTxChanIndex];
+                    mBestTxChanIndex = mTestTxChanIndex;
+                    mTestTxChanIndex = RF_TX_TEST_CHAN_1ST_USE; // mark the chan as a test and as 1st use during new test period
+                    DPRINTLN (DBG_INFO, "Try Ch Idx " + String (mBestTxChanIndex));
+                }
+                // design: start new test period
+                mTestPeriodSendCnt = 0;
+                mTestPeriodFailCnt = 0;
+            } else if (mBestTxChanIndex != mLastBestTxChanIndex) {
+                mTestPeriodSendCnt = 0;
+                mTestPeriodFailCnt = 0;
+            }
+            return mBestTxChanIndex;
+        }
+
+        void addTxChanQuality(int8_t quality) {
+            quality = mTxChanQuality[mBestTxChanIndex] + quality;
+            if (quality < RF_TX_CHAN_MIN_QUALITY) {
+                quality = RF_TX_CHAN_MIN_QUALITY;
+            } else if (quality > RF_TX_CHAN_MAX_QUALITY) {
+                quality = RF_TX_CHAN_MAX_QUALITY;
+            }
+            mTxChanQuality[mBestTxChanIndex] = quality;
+        }
+
+        void evalTxChanQuality(bool crcPass, uint8_t Retransmits, uint8_t rxFragments, uint8_t lastRxFragments, bool serialDebug = true, bool dgb_info = false) {
+            if (!Retransmits || isNewTxChan()) {
+                if (mTestPeriodSendCnt < 0xff) {
+                    mTestPeriodSendCnt++;
+                }
+            }
+            if (lastRxFragments == rxFragments) {
+                // nothing received: send probably lost
+                if (!Retransmits || isNewTxChan()) {
+                    if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
+                        // we want _QUALITY_OK at least: switch back to orig quality
+                        mTxChanQuality[mBestTxChanIndex] = mSaveOldTestChanQuality;
+                    }
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_BAD);
+                    if (mTestPeriodFailCnt < 0xff) {
+                        mTestPeriodFailCnt++;
+                    }
+                } // else: dont overestimate burst distortion
+            } else if (!lastRxFragments && crcPass) {
+                if (!Retransmits || isNewTxChan()) {
+                    // every fragment received successfull immediately
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_GOOD);
+                } else {
+                    // every fragment received successfully
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_OK);
+                }
+            } else if (crcPass) {
+                if (isNewTxChan()) {
+                    // last Fragment successfully received on new send channel
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_OK);
+                }
+            } else if (!Retransmits || isNewTxChan()) {
+                // no complete receive for this send channel
+                if (rxFragments - lastRxFragments > 2) {
+                    // graceful evaluation for big inverters that have to send 4 answer packets
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_OK);
+                } else if (rxFragments - lastRxFragments < 2) {
+                    if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
+                        // we want _QUALITY_OK at least: switch back to orig quality
+                        mTxChanQuality[mBestTxChanIndex] = mSaveOldTestChanQuality;
+                    }
+                    addTxChanQuality(RF_TX_CHAN_QUALITY_LOW);
+                    if (mTestPeriodFailCnt < 0xff) {
+                        mTestPeriodFailCnt++;
+                    }
+                } // else: _QUALITY_NEUTRAL, keep any test channel
+            } // else: dont overestimate burst distortion
+            if (mTestTxChanIndex == RF_TX_TEST_CHAN_1ST_USE) {
+                // special evaluation of test channel only at the beginning of current test period
+                mTestTxChanIndex = mBestTxChanIndex;
+            }
+            if (serialDebug) {
+                if (dgb_info || (DEBUG_LEVEL >= DBG_DEBUG)) {
+                    DPRINT_IVID(dgb_info ? DBG_INFO : DBG_DEBUG, id);
+                    DBGPRINT("Quality: ");
+                    //dumpTxChanQuality();
+                    for(uint8_t i = 0; i < RF_CHANNELS; i++) {
+                        DBGPRINT(" " + String (mTxChanQuality[i]));
+                    }
+                    DBGPRINTLN(", Cnt " + String (mTestPeriodSendCnt) + ", Fail " + String (mTestPeriodFailCnt));
+                    //DBGPRINTLN("");
+                }
+            }
+        }
+
+        void dumpTxChanQuality() {
+            for(uint8_t i = 0; i < RF_CHANNELS; i++) {
+                DBGPRINT(" " + String (mTxChanQuality[i]));
+            }
+            DBGPRINT (", Cnt " + String (mTestPeriodSendCnt) + ", Fail " + String (mTestPeriodFailCnt));
+        }
+
 
     private:
         inline void addAlarm(uint16_t code, uint32_t start, uint32_t end) {

@@ -280,7 +280,7 @@ class HmRadio : public Radio {
                 DBGPRINT(" CH");
                 DBGPRINT(String(mTxChIdx));
                 DBGPRINT(F(" | "));
-                ah::dumpBuf(mTxBuf, len);
+                ah::dumpBuf(mTxBuf, len, 1, 4, "#"+String(iv->id));
             }
 
             mNrf24.stopListening();

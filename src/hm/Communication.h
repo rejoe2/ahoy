@@ -63,7 +63,7 @@ class Communication : public CommQueue<> {
                         testMode = mHeu.getTestModeEnabled();
                         q->iv->mGotFragment = false;
                         q->iv->mGotLastMsg = false;
-                        mFirstTry = mFirstTry ? false : ( ( (IV_HM == q->iv->ivGen) || (IV_MI == q->iv->ivGen) ) && (q->iv->isAvailable()) || (millis() < 120000) );
+                        //mFirstTry = mFirstTry ? false : ( ( (IV_HM == q->iv->ivGen) || (IV_MI == q->iv->ivGen) ) && (q->iv->isAvailable() || millis() < 120000) );
                         if(NULL == q->iv->radio)
                             cmdDone(true); // can't communicate while radio is not defined!
                         mState = States::START;
@@ -95,7 +95,7 @@ class Communication : public CommQueue<> {
 
                     case States::WAIT:
                         if(millis() > mWaitTimeout_min) {
-                            if(!q->iv->mGotFragment) { // nothing received yet?
+                            if(q->iv->mGotFragment) { // nothing received yet?
                                 if(q->iv->mGotLastMsg) {
                                         //mState = States::CHECK_FRAMES;
                                         mWaitTimeout = mWaitTimeout_min;
@@ -454,8 +454,11 @@ class Communication : public CommQueue<> {
             mState = States::RESET;
             iv->mGotFragment = false;
             iv->mGotLastMsg = false;
-            iv->miMultiParts = 0;
-            mFirstTry = false; // for correct reset
+            if(( ( (IV_HM == iv->ivGen) || (IV_MI == iv->ivGen) ) && (iv->isAvailable() || millis() < 120000) )) {
+                mFirstTry = true; // for correct reset
+                iv->miMultiParts = 0;
+            } else
+                mFirstTry = false;
         }
 
 

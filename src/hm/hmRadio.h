@@ -68,6 +68,7 @@ class HmRadio : public Radio {
             mNrf24.begin(mSpi, ce, cs);
             mNrf24.setRetries(3, 15); // 3*250us + 250us and 15 loops -> 15ms
 
+            mNrf24.openReadingPipe(1, reinterpret_cast<uint8_t*>(&DTU_RADIO_ID));
             mNrf24.setChannel(mRfChLst[mRxChIdx]);
             mNrf24.startListening();
             mNrf24.setDataRate(RF24_250KBPS);
@@ -76,7 +77,6 @@ class HmRadio : public Radio {
             mNrf24.enableDynamicPayloads();
             mNrf24.setCRCLength(RF24_CRC_16);
             mNrf24.setAddressWidth(5);
-            mNrf24.openReadingPipe(1, reinterpret_cast<uint8_t*>(&DTU_RADIO_ID));
 
             // enable all receiving interrupts
             mNrf24.maskIRQ(false, false, false);
@@ -95,10 +95,11 @@ class HmRadio : public Radio {
         void loop(void) {
             if (!mIrqRcvd)
                 return; // nothing to do
-            mIrqRcvd = false;
             bool tx_ok, tx_fail, rx_ready;
             mNrf24.whatHappened(tx_ok, tx_fail, rx_ready);  // resets the IRQ pin to HIGH
             mNrf24.flush_tx();                              // empty TX FIFO
+            if(tx_ok || tx_fail)                            // do not reset in case of rx triggering
+                mIrqRcvd = false;
 
             // start listening
             //mNrf24.setChannel(23);
@@ -322,7 +323,6 @@ class HmRadio : public Radio {
         uint8_t mRfChLst[RF_CHANNELS] = {03, 23, 40, 61, 75}; // channel List:2403, 2423, 2440, 2461, 2475MHz
         uint8_t mTxChIdx = 0;
         uint8_t mRxChIdx = 0;
-        bool    mGotLastMsg = false;
         uint32_t mMillis;
 
         SPIClass* mSpi;

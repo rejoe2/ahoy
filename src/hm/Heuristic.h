@@ -103,10 +103,11 @@ class Heuristic {
                     // graceful evaluation for big inverters that have to send 4 answer packets
                     updateQuality(ih, RF_TX_CHAN_QUALITY_OK);
                 } else if((rxFragments - ih->lastRxFragments) < 2) {
+                    /*useless:
                     if(RF_TX_TEST_CHAN_1ST_USE == ih->txRfChId) {
                         // switch back to original quality
                         ih->txRfQuality[ih->txRfChId] = ih->saveOldTestQuality;
-                    }
+                    }*/
                     updateQuality(ih, RF_TX_CHAN_QUALITY_LOW);
                     if(ih->testPeriodFailCnt < 0xff)
                         ih->testPeriodFailCnt++;

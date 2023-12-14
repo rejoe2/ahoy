@@ -187,6 +187,7 @@ class Communication : public CommQueue<> {
                                 if(States::RESET == nextState) // no valid package received
                                     closeRequest(q, false);
                             } else {
+                                bool fastNext = true;
                                 if(q->iv->miMultiParts < 6) {
                                     nextState = States::WAIT;
                                 } else {
@@ -194,8 +195,16 @@ class Communication : public CommQueue<> {
                                         || ((q->cmd == MI_REQ_CH2) && (q->iv->type == INV_TYPE_2CH))
                                         || ((q->cmd == MI_REQ_CH1) && (q->iv->type == INV_TYPE_1CH))) {
                                         miComplete(q->iv);
+                                        fastNext = false;
                                     }
                                     closeRequest(q, true);
+                                    if(fastNext) {
+                                        // immediately send out regular production data request
+                                        // and reset mWaitTimeout
+                                        mWaitTimeout = mWaitTimeout - *mInverterGap;
+                                        chgCmd((q->iv->type == INV_TYPE_4CH) ? MI_REQ_4CH : MI_REQ_CH1);
+                                        mState = States::RESET;
+                                    }
                                 }
 
                             }
@@ -248,7 +257,20 @@ class Communication : public CommQueue<> {
                         if(NULL != mCbPayload)
                             (mCbPayload)(q->cmd, q->iv);
 
+                        bool fastNext = false;
+                        if ((q->cmd < 11) || (q->cmd > 18))
+                            fastNext = true;
+
                         closeRequest(q, true);
+
+                        if(fastNext) {
+                            // immediately send out regular production data request
+                            // and reset mWaitTimeout
+                            mWaitTimeout = mWaitTimeout - *mInverterGap;
+                            chgCmd(RealTimeRunData_Debug);
+                            mState = States::RESET;
+                        }
+
                         break;
                 }
             });
@@ -709,7 +731,6 @@ class Communication : public CommQueue<> {
             q->iv->mGotFragment = 0;
             mIsRetransmit = true;
             chgCmd(cmd);
-            //mState = States::WAIT;
         }
 
         void miStsConsolidate(const queue_s *q, uint8_t stschan,  record_t<> *rec, uint8_t uState, uint8_t uEnum, uint8_t lState = 0, uint8_t lEnum = 0) {

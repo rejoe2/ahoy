@@ -133,9 +133,16 @@ class HmRadio : public Radio {
                     yield();
                 }
                 // switch to next RX channel
-                if(++mRxChIdx >= RF_CHANNELS)
+                /*if(++mRxChIdx >= RF_CHANNELS)
+                    mRxChIdx = 0;*/
+
+                if(++mRxChIdx >= 3)
                     mRxChIdx = 0;
-                mNrf24->setChannel(mRfChLst[mRxChIdx]);
+
+                uint8_t nextRxCh = (mRxChIdx + mTxChIdx + 1) % RF_MAX_CHANNEL_ID;
+
+                //mNrf24->setChannel(mRfChLst[mRxChIdx]);
+                mNrf24->setChannel(mRfChLst[nextRxCh]);
                 startMicros = micros();
             }
             // not finished but time is over

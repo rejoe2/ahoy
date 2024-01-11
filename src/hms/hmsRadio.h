@@ -166,7 +166,7 @@ class CmtRadio : public Radio {
         }
 
         CmtType mCmt;
-        bool mRqstGetRx;
+        //bool mRqstGetRx;
         bool mCmtAvail;
         uint32_t mMillis;
 };

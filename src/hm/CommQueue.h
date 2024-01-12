@@ -11,9 +11,9 @@
 #include "hmInverter.h"
 #include "../utils/dbg.h"
 
-#define DEFAULT_ATTEMPS                 10
-#define MORE_ATTEMPS_ALARMDATA          15
-#define MORE_ATTEMPS_GRIDONPROFILEPARA  15
+#define DEFAULT_ATTEMPS                 5 //10
+#define MORE_ATTEMPS_ALARMDATA          5 //15
+#define MORE_ATTEMPS_GRIDONPROFILEPARA  3 //15
 
 template <uint8_t N=100>
 class CommQueue {

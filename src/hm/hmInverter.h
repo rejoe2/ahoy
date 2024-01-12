@@ -1,5 +1,5 @@
 //-----------------------------------------------------------------------------
-// 2024 Ahoy, https://ahoydtu.de
+// 2024 Ahoy, https://www.mikrocontroller.net/topic/525778
 // Creative Commons - http://creativecommons.org/licenses/by-nc-sa/4.0/deed
 //-----------------------------------------------------------------------------
 
@@ -14,7 +14,6 @@
 #define MAX_GRID_LENGTH     150
 
 #include "hmDefines.h"
-#include "../appInterface.h"
 #include "HeuristicInv.h"
 #include "../hms/hmsDefines.h"
 #include <memory>
@@ -149,9 +148,8 @@ class Inverter {
         bool          commEnabled;       // 'pause night communication' sets this field to false
         uint32_t      tsMaxAcPower;      // holds the timestamp when the MaxAC power was seen
 
-        static uint32_t  *timestamp;     // system timestamp
+        static uint32_t *timestamp;      // system timestamp
         static cfgInst_t *generalConfig; // general inverter configuration from setup
-        //static IApp      *app;           // pointer to app interface
 
     public:
 
@@ -288,7 +286,6 @@ class Inverter {
             if(isConnected) {
                 mDevControlRequest = true;
                 devControlCmd = cmd;
-                //app->triggerTickSend(); // done in RestApi.h, because of "chicken-and-egg problem ;-)"
             }
             return isConnected;
         }
@@ -640,12 +637,17 @@ class Inverter {
                     DBGPRINT(String(radioStatistics.dtuLoss));
                     DBGPRINT(F(" of "));
                     DBGPRINTLN(String(radioStatistics.dtuSent));
+                    if(mDtuAckCnt) {
+                        DBGPRINTLN("ACKs: " +
+                            String (mDtuAckCnt));
+                    }
                 }
 
                 mIvRxCnt  = rxCnt;
                 mIvTxCnt  = txCnt;
                 mDtuRxCnt = 0;  // start new interval
                 mDtuTxCnt = 0;  // start new interval
+                mDtuAckCnt = 0;
                 return true;
             }
 
@@ -849,6 +851,7 @@ class Inverter {
         uint8_t  mGetLossInterval = 0;  // request iv every AHOY_GET_LOSS_INTERVAL RealTimeRunData_Debug
         uint16_t mIvRxCnt  = 0;
         uint16_t mIvTxCnt  = 0;
+        uint16_t mDtuAckCnt = 0;
 
 };
 
@@ -961,10 +964,8 @@ static T calcMaxPowerAcCh0(Inverter<> *iv, uint8_t arg0) {
                 acMaxPower = iv->getValue(i, rec);
             }
         }
-        if(acPower > acMaxPower) {
-            iv->tsMaxAcPower = *iv->timestamp;
+        if(acPower > acMaxPower)
             return acPower;
-        }
     }
     return acMaxPower;
 }
@@ -983,8 +984,10 @@ static T calcMaxPowerDc(Inverter<> *iv, uint8_t arg0) {
                 dcMaxPower = iv->getValue(i, rec);
             }
         }
-        if(dcPower > dcMaxPower)
+        if(dcPower > dcMaxPower) {
+            iv->tsMaxAcPower = *iv->timestamp;
             return dcPower;
+        }
     }
     return dcMaxPower;
 }

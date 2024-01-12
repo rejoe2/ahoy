@@ -14,6 +14,9 @@
 #include "nrfHal.h"
 #endif
 
+#if not defined SINGLEFR_TIMEOUT
+#define SINGLEFR_TIMEOUT    300 // timeout for single frame requests
+#endif
 #define SPI_SPEED           1000000
 
 #define RF_CHANNELS         5
@@ -105,23 +108,77 @@ class HmRadio : public Radio {
         }
 
         void loop(void) {
-            if (!mIrqRcvd)
+            if (!mIrqRcvd && !mNRFisInRX)
                 return; // nothing to do
-            mIrqRcvd = false;
-            bool tx_ok, tx_fail, rx_ready;
-            mNrf24->whatHappened(tx_ok, tx_fail, rx_ready);  // resets the IRQ pin to HIGH
-            mNrf24->flush_tx();                              // empty TX FIFO
-
-            // start listening
-            uint8_t chOffset = 2;
-            mRxChIdx = (mTxChIdx + chOffset) % RF_CHANNELS;
-            mNrf24->setChannel(mRfChLst[mRxChIdx]);
-            mNrf24->startListening();
 
             if(NULL == mLastIv) // prevent reading on NULL object!
                 return;
 
-            uint32_t innerLoopTimeout = 55000;
+            if(!mNRFisInRX) {   // tx is ready //
+                mNRFisInRX = true;
+                mIrqRcvd   = false;
+                isRxInit   = true;
+                mNrf24->whatHappened(this->mIrq_tx_ok, this->mIrq_tx_fail, this->mIrq_rx_ready); // resets the IRQ pin to HIGH
+                if(this->mIrq_rx_ready) {
+                    DPRINTLN(DBG_WARN, F("unexpected rx irq!"));
+                    return;
+                }
+                if(this->mIrq_tx_ok)
+                    mLastIv->mDtuAckCnt++;
+
+                mNrf24->flush_tx();                              // empty TX FIFO
+
+                // start listening
+                uint8_t chOffset = 2;
+                //uint8_t chOffset = (mLastIv->mIsSingleframeReq || mLastIv->ivGen == IV_MI) ? 2 : 3;
+                //uint8_t chOffset = 3;//(mLastIv->mIsSingleframeReq || mLastIv->ivGen == IV_MI) ? 2 : 3;
+                mRxChIdx = (mTxChIdx + chOffset) % RF_CHANNELS;
+                mNrf24->setChannel(mRfChLst[mRxChIdx]);
+                mNrf24->startListening();
+                this->mTimeslotStart = millis();
+                //innerLoopTimeout = (mLastIv->mIsSingleframeReq || mLastIv->ivGen == IV_MI) ? 30 : 20; // ms to listen to first channel
+                innerLoopTimeout = 45 - (this->mTimeslotStart - mMillis); // might overflow...
+                outerLoopTimeout = (mLastIv->mIsSingleframeReq) ? SINGLEFR_TIMEOUT : ((mLastIv->mCmd != AlarmData) && (mLastIv->mCmd != GridOnProFilePara)) ? 400 : 600;
+                DPRINT(DBG_INFO, F("start rx CH"));
+                DBGPRINT(String(mRfChLst[mRxChIdx]));
+                DBGPRINT(F(" ms "));
+                DBGPRINTLN(String(this->mTimeslotStart - mMillis));
+                return;
+            }
+
+            if(mIrqRcvd || this->mIrq_rx_ready) { // might be changed to this->mIrq_rx_ready
+                mIrqRcvd = false;
+                if (getReceived()) // check what we got, returns true for last package
+                    mNRFisInRX = false;
+                else {
+                    innerLoopTimeout = 7;//55; // 45
+                    if (isRxInit) {
+                        isRxInit = false;
+                        mRxChIdx = (mRxChIdx + 4) % RF_CHANNELS;
+                        mNrf24->setChannel(mRfChLst[mRxChIdx]);
+                        //innerLoopTimeout = 4; // 45
+                    }
+                    this->mTimeslotStart = millis();
+                }
+                return;
+            }
+
+            if (millis() - mMillis > outerLoopTimeout) { // timeout reached!
+                mNRFisInRX = false;
+                return;
+            }
+
+            if (millis() - this->mTimeslotStart < innerLoopTimeout)
+                return; // nothing to do
+
+            innerLoopTimeout = 7;
+            mRxChIdx = (mRxChIdx + 4) % RF_CHANNELS;
+            mNrf24->setChannel(mRfChLst[mRxChIdx]);
+            this->mTimeslotStart = millis();
+            isRxInit = false;
+            return;
+
+            /*uint32_t innerLoopTimeout = 55000;
             uint32_t loopMillis       = millis();
             uint32_t outerLoopTimeout = (mLastIv->mIsSingleframeReq) ? 100 : ((mLastIv->mCmd != AlarmData) && (mLastIv->mCmd != GridOnProFilePara)) ? 400 : 600;
             bool isRxInit             = true;
@@ -134,6 +191,7 @@ class HmRadio : public Radio {
                         mIrqRcvd = false;
 
                         if (getReceived()) { // everything received
+                            mNRFisInRX = false;
                             return;
                         }
 
@@ -158,8 +216,9 @@ class HmRadio : public Radio {
                 isRxInit = false;
             }
             // not finished but time is over
-
+            mNRFisInRX = false;
             return;
+            */
         }
 
         bool isChipConnected(void) {
@@ -264,8 +323,8 @@ class HmRadio : public Radio {
 
     private:
         inline bool getReceived(void) {
-            bool tx_ok, tx_fail, rx_ready;
-            mNrf24->whatHappened(tx_ok, tx_fail, rx_ready); // resets the IRQ pin to HIGH
+            //bool tx_ok, tx_fail, rx_ready;
+            mNrf24->whatHappened(this->mIrq_tx_ok, this->mIrq_tx_fail, this->mIrq_rx_ready); // resets the IRQ pin to HIGH
 
             bool isLastPackage = false;
             while(mNrf24->available()) {
@@ -337,6 +396,9 @@ class HmRadio : public Radio {
             mNrf24->openWritingPipe(reinterpret_cast<uint8_t*>(&iv->radioId.u64));
             mNrf24->startWrite(mTxBuf, len, false); // false = request ACK response
             mMillis = millis();
+            mIrqRcvd = false;
+            mNRFisInRX = false;
+            mRqstGetRx = true; // preparation only
 
             mLastIv = iv;
             iv->mDtuTxCnt++;
@@ -364,6 +426,15 @@ class HmRadio : public Radio {
         uint8_t mRxChIdx = 0;
         bool    mGotLastMsg = false;
         uint32_t mMillis;
+        unsigned long mTimeslotStart = 0;
+        bool mIrq_tx_ok    = false;
+        bool mIrq_tx_fail  = false;
+        bool mIrq_rx_ready = false;
+        bool mNRFisInRX    = false;
+        bool isRxInit      = true;
+        uint32_t innerLoopTimeout = 55;
+        //uint32_t loopMillis       = millis();
+        uint32_t outerLoopTimeout = 400;
 
         std::unique_ptr<SPIClass> mSpi;
         std::unique_ptr<RF24> mNrf24;

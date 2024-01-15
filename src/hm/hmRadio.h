@@ -123,9 +123,9 @@ class HmRadio : public Radio {
 
             uint32_t innerLoopTimeout = 55000;
             uint32_t loopMillis       = millis();
-            uint32_t outerLoopTimeout = (mLastIv->mIsSingleframeReq) ? 100 : ((mLastIv->mCmd != AlarmData) && (mLastIv->mCmd != GridOnProFilePara)) ? 400 : 600;
+            //uint32_t outerLoopTimeout = (mLastIv->mIsSingleframeReq) ? 100 : ((mLastIv->mCmd != AlarmData) && (mLastIv->mCmd != GridOnProFilePara)) ? 400 : 600;
+            uint32_t outerLoopTimeout = DURATION_TXFRAME + mFramesExpected*DURATION_ONEFRAME + DURATION_RESERVE-10; // a little less than for Communication loop
             bool isRxInit             = true;
-
 
             while ((millis() - loopMillis) < outerLoopTimeout) {
                 uint32_t startMicros = micros();

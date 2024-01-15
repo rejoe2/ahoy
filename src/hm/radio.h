@@ -68,6 +68,10 @@ class Radio {
             return mDtuSn;
         }
 
+        void setExpectedFrames(uint8_t framesExpected) {
+            mFramesExpected = framesExpected;
+        }
+
     public:
         std::queue<packet_t> mBufCtrl;
         uint8_t mIrqOk = IRQ_UNKNOWN;
@@ -119,7 +123,7 @@ class Radio {
         volatile bool mIrqRcvd;
         bool *mSerialDebug, *mPrivacyMode, *mPrintWholeTrace;
         uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
-
+        uint8_t mFramesExpected = 0x0c;
 };
 
 #endif /*__RADIO_H__*/

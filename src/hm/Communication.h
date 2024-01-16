@@ -152,7 +152,7 @@ class Communication : public CommQueue<> {
                                         q->iv->mIvTxCnt++;
                                     if(mFirstTry) {
                                         mFirstTry     = false;
-                                                                                setAttempt();
+                                        setAttempt();
                                         mHeu.evalTxChQuality(q->iv, false, 0, 0);
                                         //q->iv->radioStatistics.rxFailNoAnser++;
                                         q->iv->radioStatistics.retransmits++;
@@ -599,6 +599,7 @@ class Communication : public CommQueue<> {
             q->iv->radioStatistics.retransmits++;
             //mWaitTime.startTimeMonitor(SINGLEFR_TIMEOUT); // timeout
             mWaitTime.startTimeMonitor(DURATION_TXFRAME + DURATION_ONEFRAME + DURATION_RESERVE);
+
             mState = States::WAIT;
         }
 
@@ -861,7 +862,6 @@ class Communication : public CommQueue<> {
                 DBGHEXLN(q->cmd);
             }
 
-            //q->iv->radio->setExpectedFrames(mFramesExpected);
             q->iv->radio->sendCmdPacket(q->iv, q->cmd, 0x00, true);
 
             //mWaitTime.startTimeMonitor(MI_TIMEOUT);

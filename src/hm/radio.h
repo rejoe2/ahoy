@@ -11,6 +11,11 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
+#define DURATION_ONEFRAME    50 // timeout parameter for each expected frame
+#define DURATION_RESERVE     50 // timeout parameter to still wait after last expected frame
+#define DURATION_TXFRAME     75 // timeout parameter for first transmission and first expected frame
+
+
 #include "../utils/dbg.h"
 #include "../utils/crc.h"
 
@@ -68,6 +73,10 @@ class Radio {
             return mDtuSn;
         }
 
+        void setExpectedFrames(uint8_t framesExpected) {
+            mFramesExpected = framesExpected;
+        }
+
     public:
         std::queue<packet_t> mBufCtrl;
         uint8_t mIrqOk = IRQ_UNKNOWN;
@@ -116,13 +125,13 @@ class Radio {
                 mDtuSn |= (t << i);
             }
             mDtuSn |= 0x80000000; // the first digit is an 8 for DTU production year 2022, the rest is filled with the ESP chipID in decimal
-        }
+                    }
 
         uint32_t mDtuSn;
         volatile bool mIrqRcvd;
         bool *mSerialDebug, *mPrivacyMode, *mPrintWholeTrace;
         uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
-
+        uint8_t mFramesExpected = 0x0c;
 };
 
 #endif /*__RADIO_H__*/

@@ -114,6 +114,7 @@ class HmRadio : public Radio {
 
             // start listening
             uint8_t chOffset = 2;
+            uint8_t chOffset2 = mLastIv->ivGen == IV_HM ? 4 : 1;
             mRxChIdx = (mTxChIdx + chOffset) % RF_CHANNELS;
             mNrf24->setChannel(mRfChLst[mRxChIdx]);
             mNrf24->startListening();
@@ -123,9 +124,9 @@ class HmRadio : public Radio {
 
             uint32_t innerLoopTimeout = 55000;
             uint32_t loopMillis       = millis();
-            uint32_t outerLoopTimeout = (mLastIv->mIsSingleframeReq) ? 100 : ((mLastIv->mCmd != AlarmData) && (mLastIv->mCmd != GridOnProFilePara)) ? 400 : 600;
+            //uint32_t outerLoopTimeout = (mLastIv->mIsSingleframeReq) ? 100 : ((mLastIv->mCmd != AlarmData) && (mLastIv->mCmd != GridOnProFilePara)) ? 400 : 600;
+            uint32_t outerLoopTimeout = DURATION_TXFRAME + mFramesExpected*DURATION_ONEFRAME + DURATION_RESERVE-10; // a little less than for Communication loop
             bool isRxInit             = true;
-
 
             while ((millis() - loopMillis) < outerLoopTimeout) {
                 uint32_t startMicros = micros();
@@ -142,7 +143,7 @@ class HmRadio : public Radio {
                             isRxInit = false;
                             if (micros() - startMicros < 42000) {
                                 innerLoopTimeout = 4088*12;
-                                mRxChIdx = (mRxChIdx + 4) % RF_CHANNELS;
+                                mRxChIdx = (mRxChIdx + chOffset2) % RF_CHANNELS;
                                 mNrf24->setChannel(mRfChLst[mRxChIdx]);
                             }
                         }
@@ -152,7 +153,7 @@ class HmRadio : public Radio {
                     yield();
                 }
                 // switch to next RX channel
-                mRxChIdx = (mRxChIdx + 4) % RF_CHANNELS;
+                mRxChIdx = (mRxChIdx + chOffset2) % RF_CHANNELS;
                 mNrf24->setChannel(mRfChLst[mRxChIdx]);
                 innerLoopTimeout = 4088;
                 isRxInit = false;

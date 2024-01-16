@@ -112,8 +112,8 @@ class Communication : public CommQueue<> {
                         }
 
                         if(q->isDevControl) {
-                            mFramesExpected = 1;
-                            q->iv->radio->setExpectedFrames(mFramesExpected);
+                            //mFramesExpected = 1;
+                            //q->iv->radio->setExpectedFrames(mFramesExpected);
                             if(ActivePowerContr == q->cmd)
                                 q->iv->powerLimitAck = false;
                             q->iv->radio->sendControlPacket(q->iv, q->cmd, q->iv->powerLimit, false);
@@ -329,6 +329,9 @@ class Communication : public CommQueue<> {
 
 
         inline uint8_t getFramesExpected(const queue_s *q) {
+            if(q->isDevControl)
+                return 1;
+
             if(q->iv->ivGen != IV_MI) {
                 if (q->cmd == RealTimeRunData_Debug) {
                     switch (q->iv->type) { // breaks are intentionally missing!

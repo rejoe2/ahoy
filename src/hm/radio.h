@@ -11,11 +11,6 @@
 #define ALL_FRAMES          0x80
 #define SINGLE_FRAME        0x81
 
-#define DURATION_ONEFRAME    50 // timeout parameter for each expected frame
-#define DURATION_RESERVE     50 // timeout parameter to still wait after last expected frame
-#define DURATION_TXFRAME     75 // timeout parameter for first transmission and first expected frame
-
-
 #include "../utils/dbg.h"
 #include "../utils/crc.h"
 
@@ -112,20 +107,17 @@ class Radio {
         void generateDtuSn(void) {
             uint32_t chipID = 0;
             #ifdef ESP32
-            chipID = (ESP.getEfuseMac() & 0xffffffff);
+            uint64_t MAC = ESP.getEfuseMac();
+            chipID = ((MAC >> 8) & 0xFF0000) | ((MAC >> 24) & 0xFF00) | ((MAC >> 40) & 0xFF);
             #else
             chipID = ESP.getChipId();
             #endif
-
-            uint8_t t;
-            for(int i = 0; i < (7 << 2); i += 4) {
-                t = (chipID >> i) & 0x0f;
-                if(t > 0x09)
-                    t -= 6;
-                mDtuSn |= (t << i);
+            mDtuSn = 0x80000000; // the first digit is an 8 for DTU production year 2022, the rest is filled with the ESP chipID in decimal
+            for(int i = 0; i < 7; i++) {
+                mDtuSn |= (chipID % 10) << (i * 4);
+                chipID /= 10;
             }
-            mDtuSn |= 0x80000000; // the first digit is an 8 for DTU production year 2022, the rest is filled with the ESP chipID in decimal
-                    }
+        }
 
         uint32_t mDtuSn;
         volatile bool mIrqRcvd;

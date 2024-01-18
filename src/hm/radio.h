@@ -13,6 +13,7 @@
 
 #include "../utils/dbg.h"
 #include "../utils/crc.h"
+#include "../utils/timemonitor.h"
 
 enum { IRQ_UNKNOWN = 0, IRQ_OK, IRQ_ERROR };
 
@@ -68,9 +69,14 @@ class Radio {
             return mDtuSn;
         }
 
+        void setExpectedFrames(uint8_t framesExpected) {
+            mFramesExpected = framesExpected;
+        }
+
     public:
         std::queue<packet_t> mBufCtrl;
         uint8_t mIrqOk = IRQ_UNKNOWN;
+        TimeMonitor mRadioWaitTime = TimeMonitor(0, true);  // start as expired (due to code in RESET state)
 
     protected:
         virtual void sendPacket(Inverter<> *iv, uint8_t len, bool isRetransmit, bool appendCrc16=true) = 0;
@@ -103,26 +109,24 @@ class Radio {
         void generateDtuSn(void) {
             uint32_t chipID = 0;
             #ifdef ESP32
-            chipID = (ESP.getEfuseMac() & 0xffffffff);
+            uint64_t MAC = ESP.getEfuseMac();
+            chipID = ((MAC >> 8) & 0xFF0000) | ((MAC >> 24) & 0xFF00) | ((MAC >> 40) & 0xFF);
             #else
             chipID = ESP.getChipId();
             #endif
-
-            uint8_t t;
-            for(int i = 0; i < (7 << 2); i += 4) {
-                t = (chipID >> i) & 0x0f;
-                if(t > 0x09)
-                    t -= 6;
-                mDtuSn |= (t << i);
+            mDtuSn = 0x80000000; // the first digit is an 8 for DTU production year 2022, the rest is filled with the ESP chipID in decimal
+            for(int i = 0; i < 7; i++) {
+                mDtuSn |= (chipID % 10) << (i * 4);
+                chipID /= 10;
             }
-            mDtuSn |= 0x80000000; // the first digit is an 8 for DTU production year 2022, the rest is filled with the ESP chipID in decimal
         }
 
         uint32_t mDtuSn;
         volatile bool mIrqRcvd;
+        bool mRqstGetRx;
         bool *mSerialDebug, *mPrivacyMode, *mPrintWholeTrace;
         uint8_t mTxBuf[MAX_RF_PAYLOAD_SIZE];
-
+        uint8_t mFramesExpected = 0x0c;
 };
 
 #endif /*__RADIO_H__*/

@@ -7,12 +7,6 @@
 #include "app.h"
 #include "utils/sun.h"
 
-#define WDT_TIMEOUT_SECONDS 8   // Watchdog Timeout 8s
-
-#if !defined(ESP32)
-    void esp_task_wdt_reset() {}
-#endif
-
 
 //-----------------------------------------------------------------------------
 app::app() : ah::Scheduler {} {}
@@ -30,7 +24,6 @@ void app::setup() {
     #endif
 
     resetSystem();
-    esp_task_wdt_reset();
 
     mSettings.setup();
     mSettings.getPtr(mConfig);
@@ -42,14 +35,16 @@ void app::setup() {
     else
         DBGPRINTLN(F("false"));
 
-    esp_task_wdt_reset();
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     if(mConfig->nrf.enabled) {
         mNrfRadio.setup(&mConfig->serial.debug, &mConfig->serial.privacyLog, &mConfig->serial.printWholeTrace, mConfig->nrf.pinIrq, mConfig->nrf.pinCe, mConfig->nrf.pinCs, mConfig->nrf.pinSclk, mConfig->nrf.pinMosi, mConfig->nrf.pinMiso);
     }
     #if defined(ESP32)
     if(mConfig->cmt.enabled) {
-        mCmtRadio.setup(&mConfig->serial.debug, &mConfig->serial.privacyLog, &mConfig->serial.printWholeTrace, mConfig->cmt.pinSclk, mConfig->cmt.pinSdio, mConfig->cmt.pinCsb, mConfig->cmt.pinFcsb);
+        mCmtRadio.setup(&mConfig->serial.debug, &mConfig->serial.privacyLog, &mConfig->serial.printWholeTrace, mConfig->cmt.pinSclk, mConfig->cmt.pinSdio, mConfig->cmt.pinCsb, mConfig->cmt.pinFcsb, false);
     }
     #endif
     #ifdef ETHERNET
@@ -64,7 +59,9 @@ void app::setup() {
         #endif
     #endif /* defined(ETHERNET) */
 
-    esp_task_wdt_reset();
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     mCommunication.setup(&mTimestamp, &mConfig->serial.debug, &mConfig->serial.privacyLog, &mConfig->serial.printWholeTrace, &mConfig->inst.gapMs);
     mCommunication.addPayloadListener(std::bind(&app::payloadEventListener, this, std::placeholders::_1, std::placeholders::_2));
@@ -81,7 +78,9 @@ void app::setup() {
             DPRINTLN(DBG_WARN, F("WARNING! your NRF24 module can't be reached, check the wiring"));
     }
 
-    esp_task_wdt_reset();
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     // when WiFi is in client mode, then enable mqtt broker
     #if !defined(AP_ONLY)
@@ -96,12 +95,18 @@ void app::setup() {
     #endif
     setupLed();
 
-    esp_task_wdt_reset();
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     mWeb.setup(this, &mSys, mConfig);
     mWeb.setProtection(strlen(mConfig->sys.adminPwd) != 0);
 
     mApi.setup(this, &mSys, mWeb.getWebSrvPtr(), mConfig);
+
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     #ifdef ENABLE_SYSLOG
     mDbgSyslog.setup(mConfig); // be sure to init after mWeb.setup (webSerial uses also debug callback)
@@ -116,13 +121,19 @@ void app::setup() {
         #endif
     #endif
 
-    esp_task_wdt_reset();
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     #if defined(ENABLE_HISTORY)
     mHistory.setup(this, &mSys, mConfig, &mTimestamp);
     #endif /*ENABLE_HISTORY*/
 
     mPubSerial.setup(mConfig, &mSys, &mTimestamp);
+
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     #if !defined(ETHERNET)
     //mImprov.setup(this, mConfig->sys.deviceName, mVersion);
@@ -135,20 +146,24 @@ void app::setup() {
     });
     #endif /*ENABLE_SIMULATOR*/
 
-
-    esp_task_wdt_reset();
     regularTickers();
 }
 
 //-----------------------------------------------------------------------------
 void app::loop(void) {
-    esp_task_wdt_reset();
+    #if defined(ESP32)
+        esp_task_wdt_reset();
+    #endif
 
     if(mConfig->nrf.enabled)
         mNrfRadio.loop();
     #if defined(ESP32)
     if(mConfig->cmt.enabled)
         mCmtRadio.loop();
+    #endif
+
+    #if defined(ESP32)
+        esp_task_wdt_reset();
     #endif
 
     ah::Scheduler::loop();

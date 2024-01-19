@@ -159,7 +159,8 @@ class HmRadio : public Radio {
                 mNrf24->startListening();
                 mTimeslotStart = millis();
                 tempRxChIdx = mRxChIdx;
-                chOffset2 = mLastIv->ivGen == IV_HM ? 4 : (mLastIv->mCmd == MI_REQ_CH1 || mLastIv->mCmd == MI_REQ_CH2) ? 1 :4; // reversed channel order for everything apart from 1/2ch MI Data requests
+                //chOffset2 = mLastIv->ivGen == IV_HM ? 4 : (mLastIv->mCmd == MI_REQ_CH1 || mLastIv->mCmd == MI_REQ_CH2) ? 1 :4; // reversed channel order for everything apart from 1/2ch MI Data requests
+                chOffset2 = 4;
                 rxPendular = false;
 
                 innerLoopTimeout = DURATION_TXFRAME;
@@ -403,7 +404,6 @@ class HmRadio : public Radio {
         bool isRxInit      = true;
         bool rxPendular = false;
         uint32_t innerLoopTimeout = DURATION_LISTEN_MIN;
-        //uint32_t outerLoopTimeout = 400;
 
         std::unique_ptr<SPIClass> mSpi;
         std::unique_ptr<RF24> mNrf24;

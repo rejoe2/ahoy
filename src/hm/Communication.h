@@ -136,8 +136,7 @@ class Communication : public CommQueue<> {
                             DBGPRINT(F("request timeout: "));
                             DBGPRINT(String(q->iv->radio->mRadioWaitTime.getRunTime()));
                             DBGPRINTLN(F("ms"));
-                        }
-
+                                                    }
                         if(!q->iv->mGotFragment) {
                             if(INV_RADIO_TYPE_CMT == q->iv->ivRadioType) {
                                 #if defined(ESP32)
@@ -209,7 +208,8 @@ class Communication : public CommQueue<> {
                     } else {
                         if(q->iv->miMultiParts < 6) {
                             mState = States::WAIT;
-                            if((q->iv->radio->mRadioWaitTime.isTimeout() && mIsRetransmit) || !mIsRetransmit) {
+                            //if((q->iv->radio->mRadioWaitTime.isTimeout() && mIsRetransmit) || !mIsRetransmit) {
+                            if(q->iv->radio->mRadioWaitTime.isTimeout() && q->attempts) {
                                 miRepeatRequest(q);
                                 return;
                             }
@@ -219,6 +219,10 @@ class Communication : public CommQueue<> {
                                 || ((q->cmd == MI_REQ_CH2) && (q->iv->type == INV_TYPE_2CH))
                                 || ((q->cmd == MI_REQ_CH1) && (q->iv->type == INV_TYPE_1CH))) {
                                 miComplete(q->iv);
+                            }
+                            if (*mSerialDebug) {
+                                DPRINT_IVID(DBG_INFO, q->iv->id);
+                                DBGPRINTLN(F("Payload (MI got all)"));
                             }
                             closeRequest(q, true);
                         }
@@ -435,7 +439,7 @@ class Communication : public CommQueue<> {
         }
 
         inline bool parseMiFrame(packet_t *p, const queue_s *q) {
-            if(!mIsRetransmit && p->packet[9] == 0x00 && p->millis < LIMIT_FAST_IV_MI) //first frame is fast?
+            if(!mIsRetransmit && (p->packet[9] == 0x00 || p->packet[9] > ALL_FRAMES) && p->millis < LIMIT_FAST_IV_MI) //first frame is fast?
                 mHeu.setIvRetriesGood(q->iv,p->millis < LIMIT_VERYFAST_IV_MI);
             if ((p->packet[0] == MI_REQ_CH1 + ALL_FRAMES)
                 || (p->packet[0] == MI_REQ_CH2 + ALL_FRAMES)
@@ -821,35 +825,23 @@ class Communication : public CommQueue<> {
                 miStsConsolidate(q, datachan, rec, p->packet[23], p->packet[24]);
 
                 if (p->packet[0] < (0x39 + ALL_FRAMES) ) {
-                    mHeu.evalTxChQuality(q->iv, true, (q->attemptsMax - 1 - q->attempts), 1);
                     miNextRequest((p->packet[0] - ALL_FRAMES + 1), q);
                 } else {
                     q->iv->miMultiParts = 7; // indicate we are ready
                 }
             } else if((p->packet[0] == (MI_REQ_CH1 + ALL_FRAMES)) && (q->iv->type == INV_TYPE_2CH)) {
-                //addImportant(q->iv, MI_REQ_CH2);
                 miNextRequest(MI_REQ_CH2, q);
-                mHeu.evalTxChQuality(q->iv, true, (q->attemptsMax - 1 - q->attempts), q->iv->curFrmCnt);
                 q->iv->mIvRxCnt++;           // statistics workaround...
 
-            } else {                      // first data msg for 1ch, 2nd for 2ch
+            } else                        // first data msg for 1ch, 2nd for 2ch
                 q->iv->miMultiParts += 6; // indicate we are ready
-
-            }
         }
 
         void miNextRequest(uint8_t cmd, const queue_s *q) {
-            incrAttempt();    // if function is called, we got something, and we necessarily need more transmissions for MI types...
-            if(*mSerialDebug) {
-                DPRINT_IVID(DBG_WARN, q->iv->id);
-                DBGPRINT(F("next request ("));
-                DBGPRINT(String(q->attempts));
-                DBGPRINT(F(" attempts left): 0x"));
-                DBGHEXLN(cmd);
-            }
-
-            /*if(q->iv->miMultiParts > 5) //if(q->iv->miMultiParts == 7)
-            q->iv->radioStatistics.rxSuccess++;*/
+            mHeu.evalTxChQuality(q->iv, true, (q->attemptsMax - 1 - q->attempts), q->iv->curFrmCnt);
+            mHeu.getTxCh(q->iv);
+            if (q->attempts < (DEFAULT_ATTEMPS - 1) )
+                incrAttempt();    // if function is called, we got something, and we necessarily need more transmissions for MI types...
             q->iv->radioStatistics.ivSent++;
 
             mFramesExpected = getFramesExpected(q);
@@ -859,6 +851,14 @@ class Communication : public CommQueue<> {
             q->iv->radio->mRadioWaitTime.startTimeMonitor(DURATION_TXFRAME + DURATION_ONEFRAME + duration_reserve[q->iv->ivRadioType]);
             q->iv->miMultiParts = 0;
             q->iv->mGotFragment = 0;
+            if(*mSerialDebug) {
+                DPRINT_IVID(DBG_WARN, q->iv->id);
+                DBGPRINT(F("next request ("));
+                DBGPRINT(String(q->attempts));
+                DBGPRINT(F(" attempts left): 0x"));
+                DBGHEXLN(cmd);
+            }
+
             mIsRetransmit = true;
             chgCmd(cmd);
             //mState = States::WAIT;
@@ -878,7 +878,7 @@ class Communication : public CommQueue<> {
             q->iv->radioStatistics.retransmits++;
 
             q->iv->radio->mRadioWaitTime.startTimeMonitor(DURATION_TXFRAME + DURATION_ONEFRAME + duration_reserve[q->iv->ivRadioType]);
-            mIsRetransmit = false;
+            //mIsRetransmit = false;
         }
 
         void miStsConsolidate(const queue_s *q, uint8_t stschan,  record_t<> *rec, uint8_t uState, uint8_t uEnum, uint8_t lState = 0, uint8_t lEnum = 0) {
@@ -959,10 +959,6 @@ class Communication : public CommQueue<> {
 
 
         void miComplete(Inverter<> *iv) {
-            if (*mSerialDebug) {
-                DPRINT_IVID(DBG_INFO, iv->id);
-                DBGPRINTLN(F("got all data msgs"));
-            }
 
             if (iv->mGetLossInterval >= AHOY_GET_LOSS_INTERVAL) { // initially mIvRxCnt = mIvTxCnt = 0
                 iv->mGetLossInterval = 1;

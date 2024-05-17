@@ -137,6 +137,7 @@ class Radio {
         std::atomic<bool> mIrqRcvd = false;
         bool *mSerialDebug = nullptr, *mPrivacyMode = nullptr, *mPrintWholeTrace = nullptr;
         std::array<uint8_t, MAX_RF_PAYLOAD_SIZE> mTxBuf;
+        Inverter<> *mLastIv = NULL;
 };
 
 #endif /*__RADIO_H__*/

@@ -141,6 +141,7 @@ class CmtRadio : public Radio {
                     mIrqRcvd = true;
             }
             iv->mDtuTxCnt++;
+            mLastIv = iv;
         }
 
         uint64_t getIvId(Inverter<> *iv) const override {
@@ -198,9 +199,9 @@ class CmtRadio : public Radio {
                 mBufCtrl.push(p);
             }
 
-            if(p.packet[9] > ALL_FRAMES) { // indicates last frame
+            if( (p.packet[9] > ALL_FRAMES) && (p.packet[0]- ALL_FRAMES == mLastIv->mCmd) ) { // indicates last frame + some plausibility check;
                 setExpectedFrames(p.packet[9] - ALL_FRAMES);
-                mRadioWaitTime.startTimeMonitor(2); // let the inverter first get back to rx mode?
+                mRadioWaitTime.startTimeMonitor(mLastIv->mCmd == RealTimeRunData_Debug ? 2 : DURATION_PAUSE_LASTFR); // let the inverter first get back to rx mode?
             }
         }
 

@@ -353,7 +353,12 @@ class Communication : public CommQueue<> {
             if(q->iv->ivGen != IV_MI) {
                 if (q->cmd == RealTimeRunData_Debug) {
                     uint8_t framecnt[4] = {2, 3, 4, 7};
-                    return framecnt[q->iv->type];
+                    if(q->iv->ivGen == IV_HM) {
+                        return framecnt[q->iv->type];
+                    }
+                    // CMT types have different frame counts, at least for 4ch models
+                    uint8_t framecnt_cmt[4] = {2, 3, 5, 7};
+                    return framecnt_cmt[q->iv->type];
                 }
 
                 switch (q->cmd) {
@@ -362,7 +367,7 @@ class Communication : public CommQueue<> {
                     case SystemConfigPara:
                         return 1;
                     case AlarmData:          return 0x0c;
-                    case GridOnProFilePara:  return 6;
+                    case GridOnProFilePara:  return q->iv->ivGen == IV_HM ? 6 : 8; // CMT models use 8 frames
 
                     /*HardWareConfig           = 3,  // 0x03
                     SimpleCalibrationPara    = 4,  // 0x04

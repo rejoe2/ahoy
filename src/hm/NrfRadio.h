@@ -176,7 +176,7 @@ class NrfRadio : public Radio {
                 if(rx_ready) {
                     if (getReceived()) { // check what we got, returns true for last package or success for single frame request
                         mNRFisInRX = false;
-                        mRadioWaitTime.startTimeMonitor(DURATION_PAUSE_LASTFR); // let the inverter first end his transmissions
+                        mRadioWaitTime.startTimeMonitor(mLastIv->mCmd == RealTimeRunData_Debug ? 2 : DURATION_PAUSE_LASTFR); // let the inverter first end his transmissions
                         mNrf24->stopListening();
                     } else {
                         innerLoopTimeout = DURATION_LISTEN_MIN;
@@ -452,7 +452,7 @@ class NrfRadio : public Radio {
         #if defined(SPI_HAL)
         nrfHal mNrfHal;
         #endif
-        Inverter<> *mLastIv = NULL;
+        //Inverter<> *mLastIv = NULL;
 };
 
 #endif /*__HM_RADIO_H__*/
